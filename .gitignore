@@ -1,0 +1,56 @@
+# macOS Finder
+.DS_Store
+
+# Xcode user-specific files
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Xcode workspace settings (keep shared, ignore per-user)
+**/*.xcodeproj/project.xcworkspace/*
+!**/*.xcodeproj/project.xcworkspace/xcshareddata
+**/*.xcodeproj/project.xcworkspace/xcshareddata/*
+!**/*.xcodeproj/project.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+
+# Xcode build products
+build/
+DerivedData/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.pins
+Package.resolved
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Carthage / CocoaPods (unlikely, but just in case)
+Carthage/Build/
+Pods/
+
+# fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Code coverage + profiling
+*.gcda
+*.gcno
+*.profdata
+*.profraw
+
+# Backup files
+*~
+*.swp
+*.swo
+
+# Claude Code session state
+.claude/
+
+# Recovery copy of the previous-life .git from the benroeder/testfs
+# fork. Kept around for a while after the sohonetlabs/testfs squash
+# in case anything needs to be recovered; remove manually once safe.
+.git.benroeder-archive/

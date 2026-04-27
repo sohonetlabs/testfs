@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.developer.fskit.fsmodule</key>
+    <true/>
+    <!-- Shared with the TestFSMountService XPC service so the service
+         can stage the tree JSON + sidecar config in a container both
+         bundles can read. Alternative (mount -o options) is undocumented
+         on FSKit today (see PLAN.md open issue 2). -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.sohonet.testfs</string>
+    </array>
+    <!-- LiveFS IOKit user-client exception, matching Apple's production
+         msdos_appex entitlements (apple-oss-distributions/msdosfs). FSKit
+         routes volume I/O through AppleLIFSUserClient; block-resource
+         extensions need this to communicate with the kernel LiveFS layer.
+         Our probe/load currently read from a sidecar JSON in the App Group
+         container instead of the block device — so this was latent — but
+         adding it aligns us with Apple's reference pattern and prevents
+         surprise on any future code path that does touch the device. -->
+    <key>com.apple.security.exception.iokit-user-client-class</key>
+    <string>AppleLIFSUserClient</string>
+    <key>com.apple.security.temporary-exception.iokit-user-client-class</key>
+    <string>AppleLIFSUserClient</string>
+</dict>
+</plist>

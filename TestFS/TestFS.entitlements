@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Unsandboxed by deliberate design.
+         Distribution path is Developer ID + notarized, not Mac App Store.
+
+         Why unsandboxed: the V1 FSKit extension requires a /dev/diskN
+         backing device, which the app conjures via hdiutil-attach of
+         a sparse image. The DiskArbitration + IOKit user-client paths
+         hdiutil walks are blocked from a sandboxed process even with
+         temporary-exception entitlements, and fskitd's
+         openWithBSDName binds the dev-node open to the caller's
+         audit token, so we also can't route hdiutil through a root
+         daemon (the dev node is then bound to root's
+         diskarbitrationd session and the user's open fails with
+         EACCES). Doing hdiutil in-process under the user's uid puts
+         disk-image session, dev-node ownership, and mount(8) under
+         the same uid.
+
+         Future: bump deployment target to macOS 26 + FSPathURLResource,
+         then a sandboxed app could feed the extension directly without
+         a backing block device.
+
+         Hardened runtime stays on via build settings; this
+         entitlements file deliberately carries no sandbox keys. -->
+</dict>
+</plist>

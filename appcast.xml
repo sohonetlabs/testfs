@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<rss xmlns:sparkle='http://www.andymatuschak.org/xml-namespaces/sparkle' version='2.0'>
+  <channel>
+    <title>TestFS</title>
+    <link>https://raw.githubusercontent.com/sohonetlabs/testfs/main/appcast.xml</link>
+    <description>Most recent TestFS releases.</description>
+    <language>en</language>
+  <item><title>Version 0.1.4</title><sparkle:version>39</sparkle:version><sparkle:shortVersionString>0.1.4</sparkle:shortVersionString><pubDate>Tue, 28 Apr 2026 00:00:01 -0000</pubDate><enclosure sparkle:edSignature='q6dL1PDCazBPUvMUd8wr/FUX00Vxpl2pGnYdhS6KbwbpHBjmxMY4Qa57b2WvNIsfFhSGQysjDad9rjzFqWBZAQ==' length='16176391' type='application/octet-stream' url='https://github.com/sohonetlabs/testfs/releases/download/v0.1.4/TestFS-0.1.4.dmg'/><sparkle:minimumSystemVersion>15.4</sparkle:minimumSystemVersion></item></channel>
+</rss>
