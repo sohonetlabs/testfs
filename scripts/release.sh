@@ -147,10 +147,29 @@ ruby "$HERE/update_appcast.rb" "$VERSION" "$BUILD" "$LENGTH" "$ED_SIG"
 echo "appcast.xml updated with v$VERSION (build $BUILD)"
 
 echo ""
+echo "=== prune stale build registrations ==="
+# Both `xcodebuild archive` and `xcodebuild -exportArchive` register
+# their output bundles with LaunchServices. After we have a notarized
+# DMG, those staging bundles have served their purpose, and leaving
+# them registered means the user (or test machines) end up with
+# multiple `+ enabled` pluginkit entries for `com.sohonet.testfsmount.appex`
+# pointing at different UUIDs — exactly the duplication that makes
+# extensionkitd resolve to a stale bundle and `mount -t testfs` fail
+# with `extensionKit.errorDomain error 2`.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
+for stale_app in \
+    "$STAGING/TestFS.app" \
+    "$EXPORT/TestFS.app" \
+    "$ARCHIVE/Products/Applications/TestFS.app"; do
+    [ -d "$stale_app" ] && "$LSREGISTER" -u "$stale_app" 2>/dev/null || true
+done
+
+echo ""
 echo "=== done ==="
 echo "Notarized DMG: $DMG"
 shasum -a 256 "$DMG"
 echo ""
 echo "Next steps:"
+echo "  git push origin main          # push BEFORE creating the release, so gh tags the right commit"
 echo "  gh release create v$VERSION \"$DMG\" --notes 'Release notes here'"
 echo "  git add appcast.xml && git commit -m 'Appcast: $VERSION' && git push --follow-tags"
