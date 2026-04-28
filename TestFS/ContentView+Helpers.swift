@@ -63,24 +63,32 @@ extension ContentView {
         )
     }
 
-    /// Translate a raw `mount(8)` failure into actionable text when
-    /// the signature matches an `fskitd` TCC denial. `mount(8)` exits
-    /// 69 (BSD `EX_UNAVAILABLE`) and reports "Operation not permitted"
-    /// when fskitd refuses to mount onto a privacy-protected
-    /// directory — the user's NSOpenPanel grant doesn't transfer to
-    /// fskitd's process, so paths under Desktop / Documents /
-    /// Downloads / iCloud Drive / Pictures / Movies / Music get
-    /// rejected. We can't probe TCC ahead of time (the database is
-    /// sandbox-protected, fskitd's posture is distinct from ours), so
-    /// we react: spot the signature and replace the opaque text.
+    /// Translate a raw `mount(8)` failure into something an end-user
+    /// can act on. We don't classify confidently because the same
+    /// raw text (`Operation not permitted` / exit 69) can come from
+    /// several places — TCC denial on the mountpoint, the FSKit
+    /// extension not being adjudicated, fskitd state, etc — and
+    /// substring matching gets it wrong as often as it gets it right.
+    /// So: surface the raw `mount(8)` text verbatim, then list the
+    /// common causes without claiming which one applies. The full
+    /// stdout/stderr is also logged to OSLog from MountManager for
+    /// the in-app log viewer.
     static func friendlyMountError(_ raw: String, mountpoint: String) -> String {
         if raw.contains("Operation not permitted") || raw.contains("exit 69") {
             return """
-                Mount failed: macOS denied access to \(mountpoint). \
-                This usually means it's in a privacy-protected directory \
-                (Desktop, Documents, Downloads, iCloud Drive, Pictures, \
-                Movies, Music). Try a directory under your home folder \
-                root or under /tmp.
+                Mount failed: \(raw)
+
+                Common causes:
+                • The FSKit extension isn't enabled or is registered \
+                in a stale state. Open System Settings → General → \
+                Login Items & Extensions → File System Extensions and \
+                make sure TestFS is on; toggling off and on again \
+                forces re-adjudication. App updates can leave this \
+                stale.
+                • The mountpoint is in a privacy-protected directory \
+                (Desktop, Documents, Downloads, iCloud Drive, \
+                Pictures, Movies, Music). /tmp/<name> is the \
+                known-safe choice.
                 """
         }
         if raw.range(of: "unknown file ?system", options: .regularExpression) != nil {
