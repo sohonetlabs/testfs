@@ -23,25 +23,28 @@ enum AppEnvironment {
         .resizable()
 
     /// Re-register and re-enable the FSKit extension when the running
-    /// build differs from the last one we did this for. Three steps:
+    /// build differs from the last one we did this for. Four steps:
     ///
     ///   1. `lsregister -f <app>` — kicks LaunchServices to re-ingest
     ///      the bundle so its database has the post-update version.
     ///   2. `pluginkit -a <appex>` — kicks pluginkit's discovery so
     ///      the extension shows up under the FSKit extension point.
-    ///   3. `pluginkit -e use -i <bundle-id>` — sets the appex's
-    ///      adjudication state to "user-enabled" (the `+` flag in
-    ///      `pluginkit -m -A` output). This is the equivalent of the
-    ///      System Settings → Login Items & Extensions → File System
-    ///      Extensions toggle being on. Without it, the extension is
-    ///      registered but mount-by-fstype fails with
-    ///      `extensionKit.errorDomain error 2 / File system named
-    ///      testfs not found` because extensionkitd refuses to invoke
-    ///      a non-`+` extension. Sparkle's auto-update path doesn't
-    ///      preserve this flag, so we re-arm it on every version
-    ///      change.
+    ///   3. `pluginkit -e ignore -i <bundle-id>` — adjudication state
+    ///      → "user-disabled" (the `-` flag).
+    ///   4. `pluginkit -e use -i <bundle-id>` — adjudication state
+    ///      → "user-enabled" (the `+` flag).
     ///
-    /// All three commands run as the user, no admin required.
+    /// Steps 3 + 4 are the toggle cycle — the same off-then-on flip
+    /// that System Settings → Login Items & Extensions → File System
+    /// Extensions does. The state *transition* is what forces
+    /// `extensionkitd` to drop its cached UUID for the appex and
+    /// re-resolve against the current bundle. Just calling `-e use`
+    /// against an already-`+` extension is a no-op and doesn't kick
+    /// `extensionkitd`, which is why mount kept failing with
+    /// `extensionKit.errorDomain error 2 / File system named testfs
+    /// not found` even after we'd run all the other steps.
+    ///
+    /// All four commands run as the user, no admin required.
     static func reregisterExtensionIfNeeded() {
         let key = "lastRegisteredVersion"
         let last = UserDefaults.standard.string(forKey: key) ?? ""
@@ -55,17 +58,17 @@ enum AppEnvironment {
         let lsregister = "/System/Library/Frameworks/CoreServices.framework"
             + "/Versions/A/Frameworks/LaunchServices.framework"
             + "/Versions/A/Support/lsregister"
+        let bundleID = TestFSConstants.extensionBundleID
         let ok1 = runSilently(lsregister, ["-f", appBundle.path])
         let ok2 = runSilently("/usr/bin/pluginkit", ["-a", appex.path])
-        let ok3 = runSilently(
-            "/usr/bin/pluginkit",
-            ["-e", "use", "-i", TestFSConstants.extensionBundleID])
+        let ok3 = runSilently("/usr/bin/pluginkit", ["-e", "ignore", "-i", bundleID])
+        let ok4 = runSilently("/usr/bin/pluginkit", ["-e", "use", "-i", bundleID])
 
-        // Stamp the version only if all three commands succeeded.
+        // Stamp the version only if all four commands succeeded.
         // A transient failure here means we should retry on next
         // launch instead of permanently giving up until the next
         // version bump.
-        if ok1 && ok2 && ok3 {
+        if ok1 && ok2 && ok3 && ok4 {
             UserDefaults.standard.set(versionLabel, forKey: key)
         }
     }
