@@ -166,7 +166,7 @@ struct ContentView: View {
                 ZStack {
                     Self.appIcon
                         .frame(width: 28, height: 28)
-                    Image(systemName: DebugBadge.symbolName)
+                    Image(systemName: IconBadge.symbolName)
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(.white, .red)
                         .font(.system(size: 10, weight: .bold))
