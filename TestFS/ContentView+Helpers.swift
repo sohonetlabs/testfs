@@ -21,6 +21,50 @@ enum AppEnvironment {
 
     static let icon: Image = Image(nsImage: NSApplication.shared.applicationIconImage)
         .resizable()
+
+    /// Re-register the host + FSKit extension with LaunchServices and
+    /// pluginkit when the running build differs from the last one we
+    /// registered. This is the user-side fix that `scripts/install.sh`
+    /// runs manually after a fresh install — Sparkle's auto-update
+    /// path doesn't trigger it, leaving `extensionkitd` with stale
+    /// adjudication after every update so mount fails with
+    /// `extensionKit.errorDomain error 2 / File system named testfs
+    /// not found` until the user toggles the System Settings switch
+    /// off and back on. Running it automatically here removes that
+    /// chore from every release.
+    static func reregisterExtensionIfNeeded() {
+        let key = "lastRegisteredVersion"
+        let last = UserDefaults.standard.string(forKey: key) ?? ""
+        guard versionLabel != last else { return }
+
+        let appBundle = Bundle.main.bundleURL
+        let appex = appBundle.appendingPathComponent(
+            "Contents/Extensions/TestFSExtension.appex")
+        guard FileManager.default.fileExists(atPath: appex.path) else { return }
+
+        let lsregister = "/System/Library/Frameworks/CoreServices.framework"
+            + "/Versions/A/Frameworks/LaunchServices.framework"
+            + "/Versions/A/Support/lsregister"
+        runSilently(lsregister, ["-f", appBundle.path])
+        runSilently("/usr/bin/pluginkit", ["-a", appex.path])
+
+        UserDefaults.standard.set(versionLabel, forKey: key)
+    }
+
+    private static func runSilently(_ tool: String, _ args: [String]) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: tool)
+        proc.arguments = args
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+        } catch {
+            // Re-registration is best-effort; fall back to the
+            // toggle-off+on user fix if it doesn't work.
+        }
+    }
 }
 
 extension ContentView {
