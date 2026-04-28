@@ -26,7 +26,10 @@ This is the macOS-native port of
    File System Extensions*.
 4. Pick a JSON tree (the **File ▸ Try an example…** menu opens an
    embedded set), pick an empty directory as the mountpoint, click
-   **Mount**.
+   **Mount**. **Avoid Desktop / Documents / Downloads / iCloud
+   Drive / Pictures / Movies / Music** — macOS won't let `fskitd`
+   write to those, and the mount will fail with *Operation not
+   permitted*. A subdir under your home folder root or `/tmp` works.
 
 The DMG is signed with a Developer ID Application certificate and
 notarized by Apple, so Gatekeeper accepts it without warnings.
@@ -56,12 +59,17 @@ If you don't have a Sohonet team signing identity, change
 
 ## Mount from the CLI
 
-The bundled scripts are thin wrappers around `hdiutil` + `mount(8)`:
+Prerequisites: `TestFS.app` is installed (so the FSKit extension is
+registered) and toggled on under *General → Login Items & Extensions
+→ File System Extensions*. `scripts/smoke.sh` verifies both before
+you bother trying to mount. Sample JSON trees live at
+`research/test_json_fs/example/` — clone with `--recurse-submodules`.
 
 ```bash
+scripts/smoke.sh                                # check the install + extension registration
 scripts/mount.sh                                # mounts test.json at /tmp/testfs
-scripts/mount.sh path/to/tree.json              # custom tree
-scripts/mount.sh path/to/tree.json /mountpoint  # custom mountpoint
+scripts/mount.sh path/to/tree.json              # custom tree, default /tmp/testfs
+scripts/mount.sh path/to/tree.json /mountpoint  # custom tree + mountpoint
 scripts/unmount.sh                              # unmount + detach the dummy disk
 ```
 
@@ -69,6 +77,12 @@ Run as your normal user — **not** `sudo`. The `mount(8) -F` path that
 FSKit V1 uses fails under sudo: `fskitd` checks the caller's audit
 token uid against the dev node's owner, and the user-owned dev node
 that `hdiutil` attached can't be opened by uid 0.
+
+Mountpoint must be outside macOS's privacy-protected directories
+(Desktop, Documents, Downloads, iCloud Drive, Pictures, Movies,
+Music) — `fskitd` is denied access there and the mount fails with
+*Operation not permitted*. The default `/tmp/testfs` and any fresh
+subdir under your home folder root are fine.
 
 ## Architecture
 
