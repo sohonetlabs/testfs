@@ -240,18 +240,41 @@ struct ContentView: View {
             return
         }
 
+        // mount(8) only confirms the kernel queued the mount; FSKit's
+        // loadResource runs asynchronously and can still fail. Verify
+        // the volume actually came up before recording it, otherwise
+        // the UI shows a phantom mount that doesn't serve file data.
+        let confirmed = await MountManager.shared.confirmMountedOrRollback(
+            prep: prep, mountpoint: mnt.path)
+        guard confirmed else {
+            status =
+                "Mount failed: the kernel accepted the mount but the FSKit "
+                + "extension didn't load the volume. Open Show log… for the "
+                + "extension's error (JSON parse error, missing config, "
+                + "or similar)."
+            return
+        }
+
+        await recordSuccessfulMount(
+            prep: prep, mountpoint: mnt.path,
+            sourceJSON: json.path, volumeName: toMount.volumeName)
+    }
+
+    private func recordSuccessfulMount(
+        prep: MountManager.PrepareResult,
+        mountpoint: String,
+        sourceJSON: String,
+        volumeName: String?
+    ) async {
         await MountRegistry.shared.record(
-            prep: prep,
-            mountpoint: mnt.path,
-            sourceJSON: json.path,
-            volumeName: toMount.volumeName
-        )
+            prep: prep, mountpoint: mountpoint,
+            sourceJSON: sourceJSON, volumeName: volumeName)
         mounts = await MountRegistry.shared.snapshot()
         // Stamp the running version as verified-working so the
         // "enable the extension" banner stays hidden until the next
         // app update potentially resets the System Settings toggle.
         verifiedMountedVersion = AppEnvironment.versionLabel
-        status = "mounted \(prep.devNodePath) at \(mnt.path)"
+        status = "mounted \(prep.devNodePath) at \(mountpoint)"
     }
 
     private func unmount(_ record: MountRecord) async {

@@ -186,6 +186,13 @@ actor MountManager {
     /// On failure, log the full stdout + stderr + exit code to OSLog
     /// so the in-app log viewer captures every byte for diagnosis;
     /// the thrown MountError carries the same payload to the UI.
+    ///
+    /// A successful return only means `mount(8)` accepted the
+    /// request and the kernel queued it. FSKit's `loadResource`
+    /// runs asynchronously after that and can still fail (JSON
+    /// parse error, missing config, etc.). Follow up with
+    /// `confirmMountedOrRollback(prep:mountpoint:)` to verify the
+    /// volume actually came up.
     func mount(devNode: String, at mountpoint: String) throws {
         let result = ShellRunner.run(
             "/sbin/mount", ["-F", "-t", TestFSConstants.fstype, devNode, mountpoint])
@@ -198,6 +205,57 @@ actor MountManager {
                 stdout=\(result.stdout, privacy: .public)
                 """)
             throw Self.toolError("mount", exit: result.exit, stderr: result.stderr)
+        }
+    }
+
+    /// 3-second ceiling covers cold-start of the extension; on a
+    /// warm system loadResource typically completes in tens of ms,
+    /// so a successful mount returns on the first or second poll.
+    private static let mountConfirmTimeout: TimeInterval = 3.0
+    /// 100 ms is short enough that the success path adds barely-
+    /// noticeable latency, and a single statfs syscall per tick is
+    /// cheap (sub-microsecond VFS lookup).
+    private static let mountConfirmPollInterval: TimeInterval = 0.1
+
+    /// Verify the FSKit extension finished bringing up the volume
+    /// after `mount(8)` returned. On failure, unmount + detach so
+    /// we don't leave a phantom mount or an orphaned dev node.
+    func confirmMountedOrRollback(prep: PrepareResult, mountpoint: String) async -> Bool {
+        if await waitForMount(at: mountpoint) { return true }
+        try? unmount(at: mountpoint)
+        try? detach(bsdName: prep.bsdName)
+        return false
+    }
+
+    /// Poll `statfs(2)` until the mountpoint reports `f_fstypename
+    /// == "testfs"`, or the timeout elapses.
+    func waitForMount(
+        at mountpoint: String,
+        timeout: TimeInterval = mountConfirmTimeout
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if Self.statfsType(at: mountpoint) == TestFSConstants.fstype {
+                return true
+            }
+            try? await Task.sleep(for: .seconds(Self.mountConfirmPollInterval))
+        }
+        return false
+    }
+
+    /// Read `f_fstypename` from `statfs(2)`. Returns `nil` if the
+    /// path can't be statfs'd (unmounted, non-existent, permission
+    /// error).
+    private static func statfsType(at path: String) -> String? {
+        var buf = statfs()
+        guard statfs(path, &buf) == 0 else { return nil }
+        // Hoist the size out of the closure so we don't re-enter
+        // exclusive access on `buf` while the pointer is live.
+        let capacity = MemoryLayout.size(ofValue: buf.f_fstypename)
+        return withUnsafePointer(to: &buf.f_fstypename) {
+            $0.withMemoryRebound(to: CChar.self, capacity: capacity) {
+                String(cString: $0)
+            }
         }
     }
 
