@@ -44,9 +44,12 @@ extension ContentView {
             Image(systemName: "info.circle.fill")
                 .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 2) {
-                Text("First time? Enable the FSKit extension")
+                Text("Enable the FSKit extension")
                     .font(.callout).bold()
-                Text("Toggle TestFS on under General → Login Items & Extensions → File System Extensions, then mount.")
+                Text(
+                    "Toggle TestFS on under General → Login Items & Extensions → "
+                    + "File System Extensions, then mount. App updates can reset "
+                    + "this toggle, so you may need to re-enable after each update.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -78,6 +81,14 @@ extension ContentView {
                 (Desktop, Documents, Downloads, iCloud Drive, Pictures, \
                 Movies, Music). Try a directory under your home folder \
                 root or under /tmp.
+                """
+        }
+        if raw.range(of: "unknown file ?system", options: .regularExpression) != nil {
+            return """
+                Mount failed: the FSKit extension isn't enabled. Toggle \
+                TestFS on under System Settings → General → Login Items \
+                & Extensions → File System Extensions, then mount again. \
+                App updates can reset this toggle.
                 """
         }
         return "mount failed: \(raw)"
