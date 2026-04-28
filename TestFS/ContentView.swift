@@ -52,7 +52,7 @@ struct ContentView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text("TestFS").font(.title)
                 Spacer()
-                Text(Self.versionLabel)
+                Text(AppEnvironment.versionLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
@@ -164,7 +164,7 @@ struct ContentView: View {
                 NSWorkspace.shared.open(URL(fileURLWithPath: record.mountpoint))
             } label: {
                 ZStack {
-                    Self.appIcon
+                    AppEnvironment.icon
                         .frame(width: 28, height: 28)
                     Image(systemName: IconBadge.symbolName)
                         .symbolRenderingMode(.palette)

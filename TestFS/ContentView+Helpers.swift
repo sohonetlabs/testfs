@@ -10,22 +10,21 @@
 import AppKit
 import SwiftUI
 
+/// App-wide constants shared between ContentView and AboutView.
+/// Bundle info and the running icon don't change for the process
+/// lifetime, so they're cached once at type init instead of being
+/// rebuilt per SwiftUI body recompute.
+enum AppEnvironment {
+    static let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    static let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    static let versionLabel = "v\(version) (build \(build))"
+
+    static let icon: Image = Image(nsImage: NSApplication.shared.applicationIconImage)
+        .resizable()
+}
+
 extension ContentView {
     static let validationEncoder = JSONEncoder()
-
-    /// Resizable wrapper around the running app's icon, cached so
-    /// each `mountRow` render reuses one `Image` value.
-    static let appIcon: Image = Image(nsImage: NSApplication.shared.applicationIconImage)
-        .resizable()
-
-    /// Bundle info is fixed for the app's lifetime, so compute the
-    /// label once at type init instead of per body recompute.
-    static let versionLabel: String = {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "v\(version) (build \(build))"
-    }()
 
     func recomputeOptionsValidation() {
         var probe = options
