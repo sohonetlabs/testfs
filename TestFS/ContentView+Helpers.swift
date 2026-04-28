@@ -61,6 +61,29 @@ extension ContentView {
         )
     }
 
+    /// Translate a raw `mount(8)` failure into actionable text when
+    /// the signature matches an `fskitd` TCC denial. `mount(8)` exits
+    /// 69 (BSD `EX_UNAVAILABLE`) and reports "Operation not permitted"
+    /// when fskitd refuses to mount onto a privacy-protected
+    /// directory — the user's NSOpenPanel grant doesn't transfer to
+    /// fskitd's process, so paths under Desktop / Documents /
+    /// Downloads / iCloud Drive / Pictures / Movies / Music get
+    /// rejected. We can't probe TCC ahead of time (the database is
+    /// sandbox-protected, fskitd's posture is distinct from ours), so
+    /// we react: spot the signature and replace the opaque text.
+    static func friendlyMountError(_ raw: String, mountpoint: String) -> String {
+        if raw.contains("Operation not permitted") || raw.contains("exit 69") {
+            return """
+                Mount failed: macOS denied access to \(mountpoint). \
+                This usually means it's in a privacy-protected directory \
+                (Desktop, Documents, Downloads, iCloud Drive, Pictures, \
+                Movies, Music). Try a directory under your home folder \
+                root or under /tmp.
+                """
+        }
+        return "mount failed: \(raw)"
+    }
+
     func pickJSON() async {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]

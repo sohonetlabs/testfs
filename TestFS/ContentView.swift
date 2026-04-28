@@ -231,7 +231,7 @@ struct ContentView: View {
             try await MountManager.shared.mount(devNode: prep.devNodePath, at: mnt.path)
         } catch {
             try? await MountManager.shared.detach(bsdName: prep.bsdName)
-            status = "mount failed: \(error.localizedDescription)"
+            status = Self.friendlyMountError(error.localizedDescription, mountpoint: mnt.path)
             return
         }
 
