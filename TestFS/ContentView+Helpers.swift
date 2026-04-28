@@ -22,16 +22,26 @@ enum AppEnvironment {
     static let icon: Image = Image(nsImage: NSApplication.shared.applicationIconImage)
         .resizable()
 
-    /// Re-register the host + FSKit extension with LaunchServices and
-    /// pluginkit when the running build differs from the last one we
-    /// registered. This is the user-side fix that `scripts/install.sh`
-    /// runs manually after a fresh install — Sparkle's auto-update
-    /// path doesn't trigger it, leaving `extensionkitd` with stale
-    /// adjudication after every update so mount fails with
-    /// `extensionKit.errorDomain error 2 / File system named testfs
-    /// not found` until the user toggles the System Settings switch
-    /// off and back on. Running it automatically here removes that
-    /// chore from every release.
+    /// Re-register and re-enable the FSKit extension when the running
+    /// build differs from the last one we did this for. Three steps:
+    ///
+    ///   1. `lsregister -f <app>` — kicks LaunchServices to re-ingest
+    ///      the bundle so its database has the post-update version.
+    ///   2. `pluginkit -a <appex>` — kicks pluginkit's discovery so
+    ///      the extension shows up under the FSKit extension point.
+    ///   3. `pluginkit -e use -i <bundle-id>` — sets the appex's
+    ///      adjudication state to "user-enabled" (the `+` flag in
+    ///      `pluginkit -m -A` output). This is the equivalent of the
+    ///      System Settings → Login Items & Extensions → File System
+    ///      Extensions toggle being on. Without it, the extension is
+    ///      registered but mount-by-fstype fails with
+    ///      `extensionKit.errorDomain error 2 / File system named
+    ///      testfs not found` because extensionkitd refuses to invoke
+    ///      a non-`+` extension. Sparkle's auto-update path doesn't
+    ///      preserve this flag, so we re-arm it on every version
+    ///      change.
+    ///
+    /// All three commands run as the user, no admin required.
     static func reregisterExtensionIfNeeded() {
         let key = "lastRegisteredVersion"
         let last = UserDefaults.standard.string(forKey: key) ?? ""
@@ -45,13 +55,23 @@ enum AppEnvironment {
         let lsregister = "/System/Library/Frameworks/CoreServices.framework"
             + "/Versions/A/Frameworks/LaunchServices.framework"
             + "/Versions/A/Support/lsregister"
-        runSilently(lsregister, ["-f", appBundle.path])
-        runSilently("/usr/bin/pluginkit", ["-a", appex.path])
+        let ok1 = runSilently(lsregister, ["-f", appBundle.path])
+        let ok2 = runSilently("/usr/bin/pluginkit", ["-a", appex.path])
+        let ok3 = runSilently(
+            "/usr/bin/pluginkit",
+            ["-e", "use", "-i", TestFSConstants.extensionBundleID])
 
-        UserDefaults.standard.set(versionLabel, forKey: key)
+        // Stamp the version only if all three commands succeeded.
+        // A transient failure here means we should retry on next
+        // launch instead of permanently giving up until the next
+        // version bump.
+        if ok1 && ok2 && ok3 {
+            UserDefaults.standard.set(versionLabel, forKey: key)
+        }
     }
 
-    private static func runSilently(_ tool: String, _ args: [String]) {
+    @discardableResult
+    private static func runSilently(_ tool: String, _ args: [String]) -> Bool {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: tool)
         proc.arguments = args
@@ -60,9 +80,9 @@ enum AppEnvironment {
         do {
             try proc.run()
             proc.waitUntilExit()
+            return proc.terminationStatus == 0
         } catch {
-            // Re-registration is best-effort; fall back to the
-            // toggle-off+on user fix if it doesn't work.
+            return false
         }
     }
 }
