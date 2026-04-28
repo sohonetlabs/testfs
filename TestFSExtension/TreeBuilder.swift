@@ -92,20 +92,13 @@ enum TreeBuilder {
             childrenIDs: [], childrenByFoldedName: [:]
         )
 
-        // Only the root gets the Spotlight-hint dotfiles: they're a
-        // volume-level signal. parentID == nil identifies the root.
-        let isRoot = (parentID == nil)
-        let effectiveContents: [TreeNode] =
-            (isRoot && ctx.options.addMacosCacheFiles)
-            ? contents + Self.macosCacheControlFiles
-            : contents
-
+        let capacity = contents.count + Self.macosCacheControlFiles.count
         var childIDs: [TreeNodeID] = []
-        childIDs.reserveCapacity(effectiveContents.count)
+        childIDs.reserveCapacity(capacity)
         var foldedLookup: [String: TreeNodeID] = [:]
-        foldedLookup.reserveCapacity(effectiveContents.count)
+        foldedLookup.reserveCapacity(capacity)
 
-        for child in effectiveContents {
+        for child in contents {
             let (childID, childName) = try visit(child, parentID: id, ctx: &ctx)
             let folded = TreeIndex.fold(childName)
             if let existingID = foldedLookup[folded],
@@ -119,6 +112,21 @@ enum TreeBuilder {
             }
             childIDs.append(childID)
             foldedLookup[folded] = childID
+        }
+
+        // Only the root gets the Spotlight-hint dotfiles: they're a
+        // volume-level signal. Skip any extra the JSON tree already
+        // staged itself (e.g. archive-torture fixtures include
+        // `.metadata_never_index`) so adding ours doesn't fold-collide.
+        if parentID == nil && ctx.options.addMacosCacheFiles {
+            for extra in Self.macosCacheControlFiles {
+                let extraName = ctx.options.unicodeNormalization.apply(to: extra.name)
+                let folded = TreeIndex.fold(extraName)
+                guard foldedLookup[folded] == nil else { continue }
+                let (extraID, _) = try visit(extra, parentID: id, ctx: &ctx)
+                childIDs.append(extraID)
+                foldedLookup[folded] = extraID
+            }
         }
 
         ctx.nodesByID[id] = TreeIndex.Node(

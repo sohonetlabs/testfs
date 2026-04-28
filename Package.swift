@@ -31,6 +31,7 @@ let package = Package(
                 "Tests",
                 "research",
                 "scripts",
+                "build",
                 "TestFSExtension/Info.plist",
                 "TestFSExtension/TestFSExtension.entitlements",
                 "TestFSExtension/TestFSExtension.swift",

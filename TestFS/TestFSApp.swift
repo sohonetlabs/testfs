@@ -94,12 +94,13 @@ private func applyIconBadge() {
     var symbolConfig = NSImage.SymbolConfiguration(
         pointSize: bugEdge, weight: .bold)
     #if DEBUG
-        // Debug build: solid red ladybug — visually distinct from
-        // the Release build's multicolor default.
+        // Debug build: solid red ladybug — clearly different from
+        // Release so a dev build stands out from a shipped one.
         symbolConfig = symbolConfig.applying(.init(paletteColors: [.systemRed]))
         let accessibility = "Debug build"
     #else
-        symbolConfig = symbolConfig.applying(.preferringMulticolor())
+        // Release: solid black ladybug as the brand mark.
+        symbolConfig = symbolConfig.applying(.init(paletteColors: [.black]))
         let accessibility = "TestFS"
     #endif
     if let bug = NSImage(
