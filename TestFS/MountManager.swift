@@ -183,10 +183,20 @@ actor MountManager {
 
     /// `mount(8)` invocation. Lives here so ContentView doesn't need
     /// to know the testfs fstype string or the `-F` raw-resource flag.
+    /// On failure, log the full stdout + stderr + exit code to OSLog
+    /// so the in-app log viewer captures every byte for diagnosis;
+    /// the thrown MountError carries the same payload to the UI.
     func mount(devNode: String, at mountpoint: String) throws {
         let result = ShellRunner.run(
             "/sbin/mount", ["-F", "-t", TestFSConstants.fstype, devNode, mountpoint])
         guard result.exit == 0 else {
+            log.error(
+                """
+                mount failed for \(devNode, privacy: .public) -> \
+                \(mountpoint, privacy: .public): exit=\(result.exit, privacy: .public) \
+                stderr=\(result.stderr, privacy: .public) \
+                stdout=\(result.stdout, privacy: .public)
+                """)
             throw Self.toolError("mount", exit: result.exit, stderr: result.stderr)
         }
     }
