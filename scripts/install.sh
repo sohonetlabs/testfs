@@ -36,11 +36,18 @@ LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Versions/A/Framewor
 APPEX=/Applications/TestFS.app/Contents/Extensions/TestFSExtension.appex
 if [ -d "$APPEX" ]; then
     pluginkit -v -a "$APPEX" || true
+    # Flip pluginkit's adjudication state to "user-enabled" (the `+`
+    # flag in `pluginkit -m -A`). Without this, mount-by-fstype fails
+    # with `extensionKit.errorDomain error 2 / File system named
+    # testfs not found`. Same call AppEnvironment.reregisterExtensionIfNeeded
+    # makes on launch after a Sparkle update — kept in sync so manual
+    # install and auto-update converge on the same end state.
+    pluginkit -e use -i com.sohonet.testfsmount.appex || true
 else
     echo "WARN: no .appex found at $APPEX - extension target may not be embedded"
 fi
 
 echo ""
-echo "Registered. Now enable TestFSExtension in:"
+echo "Registered + enabled. Verify in System Settings if you want to be sure:"
 echo "  System Settings > General > Login Items & Extensions > File System Extensions"
 open "x-apple.systempreferences:com.apple.LoginItems-Settings.extension?Extensions" || true
