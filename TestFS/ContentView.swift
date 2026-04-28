@@ -22,15 +22,18 @@ struct ContentView: View {
     @State var options: MountOptions = .default
     @State var optionsExpanded = false
 
-    /// Has the user ever successfully mounted *anything* with this
-    /// app on this machine? Mirror of UserDefaults; once true, the
-    /// "FSKit extension not enabled" first-run hint stays hidden
-    /// forever. If they later disable the extension, the mount-error
-    /// path already surfaces a clear status message — no need for
-    /// the banner to flap. Avoids depending on pluginkit's
-    /// unreliable adjudication state (Apple's own msdos/exfat
-    /// modules also show `-` and they work fine).
-    @AppStorage("hasEverMounted") var hasEverMounted = false
+    /// The version+build label the user last successfully mounted
+    /// with on this machine. Empty on first launch. The banner shows
+    /// whenever this doesn't match the running build, which covers:
+    /// fresh install (empty != current); Sparkle update that reset
+    /// the System Settings extension toggle (old version != new); a
+    /// manual install of an older build (also won't match). Once the
+    /// user mounts successfully with the current version, the banner
+    /// stays gone until the next update. We don't try to detect the
+    /// toggle state directly because pluginkit's adjudication state
+    /// isn't a reliable oracle (Apple's own msdos/exfat extensions
+    /// show `-` and they work fine).
+    @AppStorage("verifiedMountedVersion") var verifiedMountedVersion = ""
 
     /// Remembered values for the Rate limit / IOP limit toggles, so
     /// flipping the toggle off → on restores whatever the user last
@@ -99,7 +102,9 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mountSection: some View {
-        if !hasEverMounted { extensionDisabledBanner }
+        if verifiedMountedVersion != AppEnvironment.versionLabel {
+            extensionDisabledBanner
+        }
         Text("Mount").font(.headline)
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
             GridRow {
@@ -242,8 +247,10 @@ struct ContentView: View {
             volumeName: toMount.volumeName
         )
         mounts = await MountRegistry.shared.snapshot()
-        // First successful mount → hide the first-run hint forever.
-        hasEverMounted = true
+        // Stamp the running version as verified-working so the
+        // "enable the extension" banner stays hidden until the next
+        // app update potentially resets the System Settings toggle.
+        verifiedMountedVersion = AppEnvironment.versionLabel
         status = "mounted \(prep.devNodePath) at \(mnt.path)"
     }
 
