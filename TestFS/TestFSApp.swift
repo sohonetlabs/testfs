@@ -41,11 +41,21 @@ struct TestFSApp: App {
         applyIconBadge()
     }
 
+    @Environment(\.openWindow) private var openWindow
+
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
         .commands {
+            // Replace the system About panel with our own SwiftUI
+            // window so users can copy a clean diagnostics block
+            // straight into a bug report.
+            CommandGroup(replacing: .appInfo) {
+                Button("About TestFS") {
+                    openWindow(id: "about")
+                }
+            }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
                     updaterController.checkForUpdates(nil)
@@ -63,6 +73,10 @@ struct TestFSApp: App {
             LogView()
         }
         .defaultSize(width: 760, height: 480)
+        Window("About TestFS", id: "about") {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
     }
 }
 
