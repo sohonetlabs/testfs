@@ -260,6 +260,34 @@ final class TreeBuilderTests: XCTestCase {
         XCTAssertNil(index.lookup(name: ".metadata_never_index", in: sub!.id))
     }
 
+    func testCacheControlFilesDedupAgainstTreeContents() throws {
+        // archive_torture_format_sentinels.json (and similar fixtures)
+        // include `.metadata_never_index` in the JSON tree itself. Adding
+        // ours on top would case-fold-collide and the whole mount would
+        // fail. We should silently dedup and let the tree's own copy win.
+        var opts = defaultOptions()
+        opts.addMacosCacheFiles = true
+        let root: TreeNode = .directory(
+            name: "root",
+            contents: [
+                .file(name: ".metadata_never_index", size: 42),
+                .file(name: "a.txt", size: 1)
+            ])
+        let index = try TreeBuilder.build(root: root, options: opts)
+
+        // Tree's own copy preserved (size 42, not the empty 0-byte one
+        // we'd have added).
+        let tree = index.lookup(name: ".metadata_never_index", in: index.rootID)
+        XCTAssertEqual(tree?.size, 42)
+
+        // The other two cache-control extras still get added.
+        XCTAssertNotNil(index.lookup(name: ".metadata_never_index_unless_rootfs", in: index.rootID))
+        XCTAssertNotNil(index.lookup(name: ".metadata_direct_scope_only", in: index.rootID))
+
+        // Total root children: tree's 2 + 2 of our extras (3rd was dedup'd).
+        XCTAssertEqual(index.root.childrenIDs.count, 4)
+    }
+
     // MARK: - integration with real fixture
 
     func testBuildsFromVendoredTestJson() throws {

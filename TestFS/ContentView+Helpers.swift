@@ -74,6 +74,30 @@ extension ContentView {
     /// stdout/stderr is also logged to OSLog from MountManager for
     /// the in-app log viewer.
     static func friendlyMountError(_ raw: String, mountpoint: String) -> String {
+        // ExtensionKit error 2 = macOS couldn't invoke the extension.
+        // Adjudication state goes stale after an app update even though
+        // the System Settings toggle still reads "on"; toggling off+on
+        // is the user-side fix.
+        if raw.contains("extensionKit.errorDomain") {
+            return """
+                Mount failed: \(raw)
+
+                macOS couldn't reach the FSKit extension. Toggle TestFS \
+                off and back on under System Settings → General → Login \
+                Items & Extensions → File System Extensions to force \
+                re-adjudication, then try mounting again. App updates \
+                often leave the extension in this stale state without \
+                changing what the UI shows.
+                """
+        }
+        if raw.range(of: "unknown file ?system", options: .regularExpression) != nil {
+            return """
+                Mount failed: the FSKit extension isn't enabled. Toggle \
+                TestFS on under System Settings → General → Login Items \
+                & Extensions → File System Extensions, then mount again. \
+                App updates can reset this toggle.
+                """
+        }
         if raw.contains("Operation not permitted") || raw.contains("exit 69") {
             return """
                 Mount failed: \(raw)
@@ -89,14 +113,6 @@ extension ContentView {
                 (Desktop, Documents, Downloads, iCloud Drive, \
                 Pictures, Movies, Music). /tmp/<name> is the \
                 known-safe choice.
-                """
-        }
-        if raw.range(of: "unknown file ?system", options: .regularExpression) != nil {
-            return """
-                Mount failed: the FSKit extension isn't enabled. Toggle \
-                TestFS on under System Settings → General → Login Items \
-                & Extensions → File System Extensions, then mount again. \
-                App updates can reset this toggle.
                 """
         }
         return "mount failed: \(raw)"
