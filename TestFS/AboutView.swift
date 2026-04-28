@@ -20,11 +20,10 @@ struct AboutView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Image(nsImage: NSApplication.shared.applicationIconImage)
-                .resizable()
+            AppEnvironment.icon
                 .frame(width: 96, height: 96)
             Text("TestFS").font(.title2).bold()
-            Text(Self.versionLine)
+            Text(AppEnvironment.versionLabel)
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Text("Synthetic FSKit filesystem for macOS")
@@ -66,28 +65,16 @@ struct AboutView: View {
         .frame(width: 380)
     }
 
-    /// "v0.1.5 (build 43)" — Bundle info is fixed for the app's
-    /// lifetime so this is computed once at type init.
-    private static let versionLine: String = {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "?"
-        let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "v\(version) (build \(build))"
-    }()
-
     /// Live system snapshot for bug reports. Computed once per
     /// process — chip / total RAM / OS version don't change between
     /// About-window opens. The Copy button puts this exact string
     /// on the clipboard.
     private static let diagnostics: String = {
         let info = ProcessInfo.processInfo
-        let infoDict = Bundle.main.infoDictionary
-        let appVersion = infoDict?["CFBundleShortVersionString"] as? String ?? "?"
-        let appBuild = infoDict?["CFBundleVersion"] as? String ?? "?"
-        let memBytes = Int64(info.physicalMemory)
-        let mem = ByteCountFormatter.string(fromByteCount: memBytes, countStyle: .memory)
+        let mem = ByteCountFormatter.string(
+            fromByteCount: Int64(info.physicalMemory), countStyle: .memory)
         return """
-            TestFS \(appVersion) (build \(appBuild))
+            TestFS \(AppEnvironment.version) (build \(AppEnvironment.build))
             macOS \(info.operatingSystemVersionString)
             \(chipName())
             \(mem) RAM
