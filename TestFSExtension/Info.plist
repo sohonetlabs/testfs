@@ -30,7 +30,7 @@
 				<key>FSName</key>
 				<string>testfs</string>
 				<key>FSfileObjectsAreCaseSensitive</key>
-				<false/>
+				<true/>
 			</dict>
 		</dict>
 		<key>FSRequiresSecurityScopedPathURLResources</key>

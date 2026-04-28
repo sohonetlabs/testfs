@@ -23,14 +23,17 @@ enum TreeBuilder {
     ]
 
     enum BuildError: Error, LocalizedError {
-        case caseFoldCollision(directory: String, folded: String, existing: String, incoming: String)
+        /// Two siblings had the same name after unicode normalization.
+        /// Either a literal duplicate in the JSON tree or a pair of
+        /// distinct byte sequences that canonicalize to the same form
+        /// (e.g. NFC `é` and NFD `é` under `unicode_normalization=nfd`).
+        case duplicateName(directory: String, name: String)
 
         var errorDescription: String? {
             switch self {
-            case .caseFoldCollision(let dir, let folded, let existing, let incoming):
-                return "case-insensitive filename collision in '\(dir)': "
-                    + "'\(existing)' and '\(incoming)' "
-                    + "both fold to '\(folded)'"
+            case .duplicateName(let dir, let name):
+                return "duplicate filename in '\(dir)': '\(name)' "
+                    + "(check for case-fold-or-normalization-equivalent siblings)"
             }
         }
     }
@@ -69,7 +72,7 @@ enum TreeBuilder {
             ctx.nodesByID[id] = TreeIndex.Node(
                 id: id, parentID: parentID, name: name,
                 kind: .file, size: size,
-                childrenIDs: [], childrenByFoldedName: [:]
+                childrenIDs: [], childrenByName: [:]
             )
             return (id, name)
         case .directory(let rawName, let contents):
@@ -89,50 +92,50 @@ enum TreeBuilder {
         ctx.nodesByID[id] = TreeIndex.Node(
             id: id, parentID: parentID, name: name,
             kind: .directory, size: 0,
-            childrenIDs: [], childrenByFoldedName: [:]
+            childrenIDs: [], childrenByName: [:]
         )
 
         let capacity = contents.count + Self.macosCacheControlFiles.count
         var childIDs: [TreeNodeID] = []
         childIDs.reserveCapacity(capacity)
-        var foldedLookup: [String: TreeNodeID] = [:]
-        foldedLookup.reserveCapacity(capacity)
+        // Byte-keyed map (see TreeIndex.Node.childrenByName for why
+        // not String) so NFC and NFD distinct byte sequences don't
+        // collide as keys.
+        var byName: [Data: TreeNodeID] = [:]
+        byName.reserveCapacity(capacity)
 
         for child in contents {
             let (childID, childName) = try visit(child, parentID: id, ctx: &ctx)
-            let folded = TreeIndex.fold(childName)
-            if let existingID = foldedLookup[folded],
-               let existingName = ctx.nodesByID[existingID]?.name {
-                throw BuildError.caseFoldCollision(
+            let key = Data(childName.utf8)
+            if byName[key] != nil {
+                throw BuildError.duplicateName(
                     directory: displayPath(of: id, nodesByID: ctx.nodesByID),
-                    folded: folded,
-                    existing: existingName,
-                    incoming: childName
+                    name: childName
                 )
             }
             childIDs.append(childID)
-            foldedLookup[folded] = childID
+            byName[key] = childID
         }
 
         // Only the root gets the Spotlight-hint dotfiles: they're a
         // volume-level signal. Skip any extra the JSON tree already
         // staged itself (e.g. archive-torture fixtures include
-        // `.metadata_never_index`) so adding ours doesn't fold-collide.
+        // `.metadata_never_index`) so we don't double-add.
         if parentID == nil && ctx.options.addMacosCacheFiles {
             for extra in Self.macosCacheControlFiles {
                 let extraName = ctx.options.unicodeNormalization.apply(to: extra.name)
-                let folded = TreeIndex.fold(extraName)
-                guard foldedLookup[folded] == nil else { continue }
+                let extraKey = Data(extraName.utf8)
+                guard byName[extraKey] == nil else { continue }
                 let (extraID, _) = try visit(extra, parentID: id, ctx: &ctx)
                 childIDs.append(extraID)
-                foldedLookup[folded] = extraID
+                byName[extraKey] = extraID
             }
         }
 
         ctx.nodesByID[id] = TreeIndex.Node(
             id: id, parentID: parentID, name: name,
             kind: .directory, size: 0,
-            childrenIDs: childIDs, childrenByFoldedName: foldedLookup
+            childrenIDs: childIDs, childrenByName: byName
         )
         return (id, name)
     }
