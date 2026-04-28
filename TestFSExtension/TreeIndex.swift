@@ -3,10 +3,12 @@
 //  TestFSCore / TestFSExtension
 //
 //  Pure-Swift representation of a parsed `tree -J -s` tree with stable
-//  monotonic IDs, preserved insertion order, and case-folded name
-//  lookup. TestFSVolume / TestFSItem (FSKit) wrap this at the next
-//  layer; TreeIndex itself has no FSKit dependency so it can be unit
-//  tested via `swift test`.
+//  monotonic IDs, preserved insertion order, and case-sensitive name
+//  lookup (matching the Python `jsonfs.py` upstream — see
+//  research/test_json_fs/jsonfs.py:_sanitize_path which never folds).
+//  TestFSVolume / TestFSItem (FSKit) wrap this at the next layer;
+//  TreeIndex itself has no FSKit dependency so it can be unit tested
+//  via `swift test`.
 //
 
 import Foundation
@@ -33,7 +35,13 @@ struct TreeIndex: Sendable, Equatable {
         let kind: NodeKind
         let size: UInt64  // 0 for directories
         let childrenIDs: [TreeNodeID]
-        let childrenByFoldedName: [String: TreeNodeID]
+        /// Children keyed by raw UTF-8 bytes of the unicode-normalized
+        /// name. Bytes (not String) is deliberate: Swift's String
+        /// dict-key hashing uses canonical equivalence, so NFC `é`
+        /// (U+00E9) and NFD `é` (U+0065 U+0301) collide as String
+        /// keys even though they're distinct byte sequences. Python
+        /// upstream's path_map is byte-distinct; this matches that.
+        let childrenByName: [Data: TreeNodeID]
     }
 
     let nodesByID: [TreeNodeID: Node]
@@ -54,20 +62,14 @@ struct TreeIndex: Sendable, Equatable {
     }
 
     /// Lookup a child by name in the given directory. The lookup is
-    /// case-insensitive (matching `FSfileObjectsAreCaseSensitive=false`
-    /// in the extension's Info.plist) and applies `unicodeNormalization`
-    /// to the incoming name so NFC/NFD variants both resolve.
+    /// case-sensitive (matching `FSfileObjectsAreCaseSensitive=true`
+    /// in the extension's Info.plist and the Python `jsonfs.py`
+    /// upstream) and applies `unicodeNormalization` to the incoming
+    /// name so NFC/NFD variants both resolve when normalization is on.
     func lookup(name: String, in directoryID: TreeNodeID) -> Node? {
         guard let parent = nodesByID[directoryID] else { return nil }
-        let folded = TreeIndex.fold(unicodeNormalization.apply(to: name))
-        guard let childID = parent.childrenByFoldedName[folded] else { return nil }
+        let key = Data(unicodeNormalization.apply(to: name).utf8)
+        guard let childID = parent.childrenByName[key] else { return nil }
         return nodesByID[childID]
-    }
-
-    /// Case-folding used for childrenByFoldedName and lookup. Uses
-    /// root-locale lowercasing so Turkish I / German ß do not produce
-    /// surprising results.
-    static func fold(_ name: String) -> String {
-        name.lowercased()
     }
 }

@@ -94,6 +94,10 @@ TestFS.app
                                   from its own container)
 ```
 
+The mounted volume is **case-sensitive** (matches the Python `jsonfs.py`
+upstream). `Foo.txt` and `foo.txt` are independent entries; lookup is
+byte-exact after `unicode_normalization` is applied (default NFD).
+
 \* The host is intentionally unsandboxed because mounting in-process
 needs `hdiutil` access to attach a dummy raw disk image — a path that
 DiskArbitration + the IOKit user client refuse from a sandboxed
