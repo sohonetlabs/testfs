@@ -29,11 +29,19 @@ enum TreeBuilder {
         /// (e.g. NFC `é` and NFD `é` under `unicode_normalization=nfd`).
         case duplicateName(directory: String, name: String)
 
+        /// Adding this file's size would overflow the running
+        /// `totalFileBytes` accumulator or the volume's reported
+        /// block-count math. Reject at build time so the volume layer
+        /// can rely on `totalFileBytes + 4095` not overflowing.
+        case totalSizeOverflow(directory: String, name: String)
+
         var errorDescription: String? {
             switch self {
             case .duplicateName(let dir, let name):
                 return "duplicate filename in '\(dir)': '\(name)' "
                     + "(check for case-fold-or-normalization-equivalent siblings)"
+            case .totalSizeOverflow(let dir, let name):
+                return "file size overflows volume accounting in '\(dir)': '\(name)'"
             }
         }
     }
