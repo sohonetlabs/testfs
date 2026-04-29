@@ -44,7 +44,10 @@ final class TestFSVolume: FSVolume {
 
         let uid = options.uid ?? getuid()
         let gid = options.gid ?? getgid()
-        let mtimeDate = MountOptions.parseMtime(options.mtime) ?? Date(timeIntervalSince1970: 0)
+        // Safe to force-unwrap: MountOptions.load rejects unparseable
+        // mtime; tests constructing MountOptions directly use the
+        // default, which is a valid date.
+        let mtimeDate = MountOptions.parseMtime(options.mtime)!
         let mtime = timespec(tv_sec: Int(mtimeDate.timeIntervalSince1970), tv_nsec: 0)
         let dirMode = UInt32(S_IFDIR | 0o555)
         let fileMode = UInt32(S_IFREG | 0o444)

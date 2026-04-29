@@ -175,10 +175,7 @@ func parseSize(_ raw: String) -> Int? {
 }
 
 extension MountOptions {
-    /// Parse a `mtime` string, accepting date-only (`YYYY-MM-DD`) or
-    /// full ISO 8601 (`YYYY-MM-DDTHH:mm:ssZ`). Date-only is
-    /// midnight UTC. Single source of truth used by both the host's
-    /// GUI picker and the extension.
+    /// Accepts date-only (`YYYY-MM-DD`, midnight UTC) or full ISO 8601.
     static func parseMtime(_ raw: String) -> Date? {
         let dateOnly = ISO8601DateFormatter()
         dateOnly.formatOptions = [.withFullDate]
@@ -188,7 +185,6 @@ extension MountOptions {
         return dateTime.date(from: raw)
     }
 
-    /// ISO 8601 string `parseMtime` round-trips.
     static func formatMtime(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
@@ -390,6 +386,9 @@ extension MountOptions {
         }
         guard options.iopLimit >= 0 else {
             throw LoadError.invalidIopLimit(options.iopLimit)
+        }
+        guard parseMtime(options.mtime) != nil else {
+            throw LoadError.invalidMtime(options.mtime)
         }
         return options
     }
