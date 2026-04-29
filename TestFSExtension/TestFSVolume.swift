@@ -44,9 +44,9 @@ final class TestFSVolume: FSVolume {
 
         let uid = options.uid ?? getuid()
         let gid = options.gid ?? getgid()
-        // Safe to force-unwrap: MountOptions.load rejects unparseable
-        // mtime; tests constructing MountOptions directly use the
-        // default, which is a valid date.
+        // Safe: load() rejects unparseable mtime, and the default
+        // ("2017-10-17") parses. Test-constructed options bypassing
+        // load() must use a parseable mtime.
         let mtimeDate = MountOptions.parseMtime(options.mtime)!
         let mtime = timespec(tv_sec: Int(mtimeDate.timeIntervalSince1970), tv_nsec: 0)
         let dirMode = UInt32(S_IFDIR | 0o555)

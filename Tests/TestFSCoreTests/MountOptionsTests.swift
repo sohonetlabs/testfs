@@ -193,7 +193,7 @@ final class MountOptionsTests: XCTestCase {
 
     func testRejectsInvalidMtime() {
         // A bad mtime would otherwise mount silently with epoch
-        // timestamps for every file (issue #24).
+        // timestamps for every file.
         let json = Data(#"{"config":"/t","mtime":"not-a-date"}"#.utf8)
         XCTAssertThrowsError(try MountOptions.load(from: json)) { error in
             guard let err = error as? MountOptions.LoadError,
