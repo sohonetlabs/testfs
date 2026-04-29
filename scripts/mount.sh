@@ -43,9 +43,49 @@ if mount | grep -q " on $MNT "; then
     "$HERE/unmount.sh" "$MNT"
 fi
 
-DEV=$("$HERE/devdisk.sh")
+# Allocate a fresh per-UUID image so concurrent mount.sh invocations
+# get distinct /dev/diskN devices. Mirror MountManager.prepareMount's
+# scheme — a singleton dummy.img would key the sidecar files (which
+# the extension looks up by BSD name) the same for every concurrent
+# mount, so the second mount would stomp the first's staged state.
+# Note: the osascript admin prompt now fires on every invocation
+# (the deleted devdisk.sh fired only when its singleton image was
+# missing). Worth knowing before scripting this in a test loop.
+DUMMIES_DIR="$HOME/Library/Application Support/TestFS/dummies"
+mkdir -p "$DUMMIES_DIR"
+UUID=$(/usr/bin/uuidgen)
+IMG="$DUMMIES_DIR/dummy-$UUID.img"
+DEV=""
+# Detach the device + remove the image on any abnormal exit so a
+# user-cancelled osascript prompt or a downstream mount(8) failure
+# can't leak /dev/diskN attachments and orphan image files.
+cleanup_alloc() {
+    if [ -n "$DEV" ]; then
+        hdiutil detach "$DEV" -quiet 2>/dev/null || true
+    fi
+    rm -f "$IMG"
+}
+trap cleanup_alloc EXIT
+mkfile -n 100m "$IMG"
+
+# Match MountManager.hdiutilAttach's parser: pick the first line
+# containing `/dev/`, not literally line 1, so a leading blank or
+# warning line from hdiutil doesn't poison DEV.
+DEV=$(/usr/bin/hdiutil attach -nomount -imagekey diskimage-class=CRawDiskImage "$IMG" \
+    | awk '/\/dev\// {print $1; exit}')
+if [ -z "$DEV" ]; then
+    echo "FAIL: hdiutil did not return a device node" >&2
+    exit 1
+fi
+
+# fskitd's audit-token check rejects uid 0 against a user-owned dev
+# node, so mount -F under sudo would fail. osascript surfaces the
+# admin prompt as a GUI dialog so this works non-interactively from
+# outside a tty.
+osascript -e "do shell script \"chown $USER $DEV\" with administrator privileges" >/dev/null
+
 BSD="${DEV#/dev/}"
-echo "Dummy dev node: $DEV (bsdName=$BSD)"
+echo "Allocated $DEV (image $IMG, bsdName=$BSD)"
 
 CONTAINER_DIR="$HOME/Library/Containers/com.sohonet.testfsmount.appex/Data/Library/Application Support/TestFS"
 mkdir -p "$CONTAINER_DIR"
@@ -70,4 +110,7 @@ echo "Wrote   $SIDECAR"
 mkdir -p "$MNT"
 echo "Mounting testfs on $MNT"
 mount -F -t testfs "$DEV" "$MNT"
+# Mount succeeded — clear the alloc cleanup trap so the script's
+# normal exit doesn't detach the device that's now backing the mount.
+trap - EXIT
 mount | grep "$MNT" || true
