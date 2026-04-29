@@ -34,14 +34,27 @@ if [ -n "$BSD" ]; then
     rm -f "$CONTAINER_DIR/active-$BSD.json" "$CONTAINER_DIR/tree-$BSD.json"
 fi
 
-# Detach the dummy disk image if it's attached and nothing else uses it.
-IMG="$HOME/Library/Application Support/TestFS/dummy.img"
-IMG_DEV=$(hdiutil info 2>/dev/null \
-    | awk -v img="$IMG" '
-        /^image-path/ { path = $3; for (i=4; i<=NF; i++) path = path " " $i }
-        /^\/dev\/disk/ && path == img { print $1; exit }
-    ')
-if [ -n "$IMG_DEV" ] && ! mount | grep -q "^$IMG_DEV "; then
-    echo "Detaching $IMG_DEV"
-    hdiutil detach "$IMG_DEV" || true
+# The host writes one image per mount under TestFS/dummies/, so we
+# can't match by a fixed filename — resolve the device through the
+# mount table instead, then sweep stragglers by image directory.
+if [ -n "$DEV" ]; then
+    echo "Detaching $DEV"
+    hdiutil detach "$DEV" || true
 fi
+
+# Sweep orphan attachments: anything under TestFS/dummies/ that's
+# still attached but no longer mounted (left over from previous
+# unclean unmounts or app-driven mounts that never ran this script).
+DUMMIES_DIR="$HOME/Library/Application Support/TestFS/dummies/"
+hdiutil info 2>/dev/null \
+    | awk -v dir="$DUMMIES_DIR" '
+        /^image-path/ { path = $3; for (i=4; i<=NF; i++) path = path " " $i }
+        /^\/dev\/disk/ && index(path, dir) == 1 { print $1 "\t" path }
+    ' \
+    | while IFS=$'\t' read -r dev img_path; do
+        [ -z "$dev" ] && continue
+        if ! mount | grep -q "^$dev "; then
+            echo "Detaching orphan $dev ($img_path)"
+            hdiutil detach "$dev" || true
+        fi
+    done
