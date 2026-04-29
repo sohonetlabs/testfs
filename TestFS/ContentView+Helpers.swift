@@ -8,6 +8,7 @@
 //
 
 import AppKit
+import OSLog
 import SwiftUI
 
 /// App-wide constants shared between ContentView and AboutView.
@@ -49,25 +50,76 @@ enum AppEnvironment {
     /// A `false` return triggers `ExtensionReregistration` to clear
     /// its memoized task so a later mount click can retry instead
     /// of awaiting a wedged result forever.
+    /// Path to the private LaunchServices `lsregister` binary, used by
+    /// both `performReregisterIfNeeded` and `sweepStaleRegistrations`.
+    private static let lsregisterPath =
+        "/System/Library/Frameworks/CoreServices.framework"
+        + "/Versions/A/Frameworks/LaunchServices.framework"
+        + "/Versions/A/Support/lsregister"
+
     @discardableResult
     static func performReregisterIfNeeded() -> Bool {
+        // Sweep stale LaunchServices entries before any toggle work.
+        // macOS 26's ExtensionKit hard-fails (Cocoa 4099) when the
+        // bundle resolver latches onto a stale path that pluginkit
+        // no longer reflects, so accumulated DMG / Trash / dev-build
+        // registrations turn into "extensionKit error 2 / testfs not
+        // found" mount failures even with a clean install. See #68.
+        let sweptCount = sweepStaleRegistrations()
         let last = UserDefaults.standard.string(forKey: "verifiedMountedVersion") ?? ""
-        guard versionLabel != last else { return true }
+        // Toggle when the version changed (post-update) OR the sweep
+        // removed anything: extensionkitd may still have a UUID cached
+        // against a now-unregistered bundle, and only the ignore→use
+        // cycle drops that cache.
+        guard versionLabel != last || sweptCount > 0 else { return true }
 
         let appBundle = Bundle.main.bundleURL
         let appex = appBundle.appendingPathComponent(
             "Contents/Extensions/TestFSExtension.appex")
         guard FileManager.default.fileExists(atPath: appex.path) else { return false }
 
-        let lsregister = "/System/Library/Frameworks/CoreServices.framework"
-            + "/Versions/A/Frameworks/LaunchServices.framework"
-            + "/Versions/A/Support/lsregister"
         let bundleID = TestFSConstants.extensionBundleID
-        let ok1 = runSilently(lsregister, ["-f", appBundle.path])
+        let ok1 = runSilently(lsregisterPath, ["-f", appBundle.path])
         let ok2 = runSilently("/usr/bin/pluginkit", ["-a", appex.path])
         let ok3 = runSilently("/usr/bin/pluginkit", ["-e", "ignore", "-i", bundleID])
         let ok4 = runSilently("/usr/bin/pluginkit", ["-e", "use", "-i", bundleID])
         return ok1 && ok2 && ok3 && ok4
+    }
+
+    /// Sweep stale LaunchServices registrations for our host bundle
+    /// ID, keeping only the running bundle's path. `lsregister -u`
+    /// on an app bundle cascades to its embedded appex, so we don't
+    /// enumerate the extension's bundle ID separately.
+    ///
+    /// Returns the count of removed paths. Called every launch from
+    /// `performReregisterIfNeeded`; a non-zero return triggers the
+    /// extensionkitd toggle cycle even when the host version is
+    /// unchanged.
+    @discardableResult
+    static func sweepStaleRegistrations() -> Int {
+        let log = Logger(subsystem: TestFSConstants.logSubsystem, category: "lsregister-sweep")
+        guard let bundleID = Bundle.main.bundleIdentifier else { return 0 }
+        // Resolve symlinks: Gatekeeper translocation, /var ↔ /private/var,
+        // and bind-mount paths can otherwise produce false mismatches
+        // when comparing the same physical bundle.
+        let canonical = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        let stale = NSWorkspace.shared
+            .urlsForApplications(withBundleIdentifier: bundleID)
+            .filter { $0.resolvingSymlinksInPath().path != canonical }
+        guard !stale.isEmpty else { return 0 }
+        let stalePaths = stale.map(\.path)
+        for path in stalePaths {
+            log.info("sweeping stale registration: \(path, privacy: .public)")
+        }
+        // `lsregister -u` accepts N paths per invocation, so batch all
+        // stale removals into one subprocess to amortize fork+exec.
+        let batchOK = runSilently(lsregisterPath, ["-u"] + stalePaths)
+        if batchOK {
+            log.info("sweep removed \(stalePaths.count, privacy: .public) stale path(s)")
+            return stalePaths.count
+        }
+        log.error("sweep failed for batch of \(stalePaths.count, privacy: .public) path(s)")
+        return 0
     }
 
     /// 5s per command. Real `lsregister`/`pluginkit` runs finish in
