@@ -42,6 +42,10 @@ struct TreeIndex: Sendable, Equatable {
         /// keys even though they're distinct byte sequences. Python
         /// upstream's path_map is byte-distinct; this matches that.
         let childrenByName: [Data: TreeNodeID]
+        /// Number of immediate child directories. Used by the volume
+        /// layer to compute Unix `st_nlink` as `2 + directoryChildCount`
+        /// for directories. Always 0 for files.
+        let directoryChildCount: Int
     }
 
     let nodesByID: [TreeNodeID: Node]

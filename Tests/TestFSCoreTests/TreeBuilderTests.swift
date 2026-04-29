@@ -220,6 +220,27 @@ final class TreeBuilderTests: XCTestCase {
         XCTAssertEqual(index.lookup(name: "gig", in: index.rootID)?.size, 1_073_741_824)
     }
 
+    // MARK: - directory link count
+
+    func testDirectoryChildCountReflectsImmediateSubdirs() throws {
+        let root: TreeNode = .directory(
+            name: "r",
+            contents: [
+                .directory(name: "sub1", contents: [
+                    .directory(name: "deep", contents: [])
+                ]),
+                .directory(name: "sub2", contents: []),
+                .file(name: "a.txt", size: 1)
+            ])
+        let index = try TreeBuilder.build(root: root, options: defaultOptions())
+        // Root has two immediate subdirs (sub1, sub2); the file doesn't count.
+        XCTAssertEqual(index.root.directoryChildCount, 2)
+        // sub1 has one subdir (deep).
+        XCTAssertEqual(index.lookup(name: "sub1", in: index.rootID)?.directoryChildCount, 1)
+        // sub2 and deep are leaves.
+        XCTAssertEqual(index.lookup(name: "sub2", in: index.rootID)?.directoryChildCount, 0)
+    }
+
     // MARK: - macOS cache-control dotfiles
 
     func testAddsMacosCacheControlFiles() throws {

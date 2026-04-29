@@ -97,7 +97,8 @@ enum TreeBuilder {
             ctx.nodesByID[id] = TreeIndex.Node(
                 id: id, parentID: parentID, name: name,
                 kind: .file, size: size,
-                childrenIDs: [], childrenByName: [:]
+                childrenIDs: [], childrenByName: [:],
+                directoryChildCount: 0
             )
             return (id, name)
         case .directory(let rawName, let contents):
@@ -117,7 +118,8 @@ enum TreeBuilder {
         ctx.nodesByID[id] = TreeIndex.Node(
             id: id, parentID: parentID, name: name,
             kind: .directory, size: 0,
-            childrenIDs: [], childrenByName: [:]
+            childrenIDs: [], childrenByName: [:],
+            directoryChildCount: 0
         )
 
         let capacity = contents.count + Self.macosCacheControlFiles.count
@@ -160,7 +162,8 @@ enum TreeBuilder {
         ctx.nodesByID[id] = TreeIndex.Node(
             id: id, parentID: parentID, name: name,
             kind: .directory, size: 0,
-            childrenIDs: childIDs, childrenByName: byName
+            childrenIDs: childIDs, childrenByName: byName,
+            directoryChildCount: 0
         )
         return (id, name)
     }
