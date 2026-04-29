@@ -116,6 +116,8 @@ extension TestFSVolume: FSVolume.Operations {
     ) async throws -> (FSItem, FSFileName) {
         try await throttle.gate()
         let dir = try requireTestItem(directory)
+        // POSIX: traversing through a non-directory is ENOTDIR, not ENOENT.
+        guard dir.node.kind == .directory else { throw posixError(.ENOTDIR) }
         let nameString = name.string ?? ""
         guard let child = index.lookup(name: nameString, in: dir.node.id),
             let item = itemsByID[child.id]
@@ -154,6 +156,8 @@ extension TestFSVolume: FSVolume.Operations {
     ) async throws -> FSDirectoryVerifier {
         try await throttle.gate()
         let dir = try requireTestItem(directory)
+        // POSIX: traversing through a non-directory is ENOTDIR, not ENOENT.
+        guard dir.node.kind == .directory else { throw posixError(.ENOTDIR) }
         if options.verbose {
             Log.lookup.debug(
                 "enumerate '\(dir.node.name, privacy: .public)' from cookie \(cookie.rawValue)")
