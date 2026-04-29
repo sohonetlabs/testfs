@@ -90,10 +90,11 @@ enum AppEnvironment {
             return false
         }
         if done.wait(timeout: .now() + subprocessTimeout) == .timedOut {
-            // SIGTERM the wedged child so the actor can move on. The
-            // termination handler will eventually fire as the process
-            // exits, but we don't wait for it.
-            proc.terminate()
+            // A child that traps SIGTERM (or is stuck in uninterruptible
+            // I/O) would survive a bare terminate(), letting a later
+            // retry stack overlapping pluginkit / lsregister processes
+            // against the same registration.
+            ShellRunner.terminate(proc, exitSem: done)
             return false
         }
         return proc.terminationStatus == 0
