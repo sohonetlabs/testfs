@@ -45,12 +45,36 @@ fi
 # Sweep orphan attachments: anything under TestFS/dummies/ that's
 # still attached but no longer mounted (left over from previous
 # unclean unmounts or app-driven mounts that never ran this script).
+# Parse `hdiutil info -plist` instead of the text format — the
+# text-format `image-path` token is unreliable on newer macOS
+# versions, and the app-side sweep (MountManager.attachedImagePaths)
+# already moved to plistlib for the same reason.
 DUMMIES_DIR="$HOME/Library/Application Support/TestFS/dummies/"
-hdiutil info 2>/dev/null \
-    | awk -v dir="$DUMMIES_DIR" '
-        /^image-path/ { path = $3; for (i=4; i<=NF; i++) path = path " " $i }
-        /^\/dev\/disk/ && index(path, dir) == 1 { print $1 "\t" path }
-    ' \
+# Static python body; pass field values via env vars, never inline-
+# interpolate from the shell. Same invariant as scripts/mount.sh.
+# system-entities[0] is the whole-disk entry — TestFS dummy images
+# are raw files (mkfile + hdiutil attach -nomount), so they have no
+# slice table and the first entry is the only entry.
+DUMMIES_DIR="$DUMMIES_DIR" /usr/bin/python3 -c '
+import os, plistlib, subprocess, sys
+info = subprocess.run(
+    ["/usr/bin/hdiutil", "info", "-plist"],
+    capture_output=True, check=False
+)
+if info.returncode != 0:
+    sys.exit(0)
+data = plistlib.loads(info.stdout)
+prefix = os.environ["DUMMIES_DIR"]
+for image in data.get("images", []):
+    path = image.get("image-path", "")
+    if not path.startswith(prefix):
+        continue
+    for entity in image.get("system-entities", []):
+        dev = entity.get("dev-entry", "")
+        if dev:
+            print(f"{dev}\t{path}")
+            break
+' \
     | while IFS=$'\t' read -r dev img_path; do
         [ -z "$dev" ] && continue
         if ! mount | grep -q "^$dev "; then
