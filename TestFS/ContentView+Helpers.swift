@@ -77,6 +77,13 @@ enum AppEnvironment {
         // ExtensionKit instances, leaving the old PID alive holding a
         // stale UUID (#70).
         _ = killOrphanExtensionProcesses()
+        // Kill fskit_agent's stale XPC cache. Killing an orphan appex
+        // tears down sibling helpers via runningboard; fskit_agent
+        // (the per-user broker) still references those torn-down
+        // PIDs and every subsequent spawn fails with `connection to
+        // service with pid <N> was invalidated`. launchd respawns it
+        // on demand (#72).
+        _ = killFSKitAgent()
 
         let appBundle = Bundle.main.bundleURL
         let appex = appBundle.appendingPathComponent(

@@ -69,4 +69,23 @@ extension AppEnvironment {
         }
         return 0
     }
+
+    /// Kill `fskit_agent`, the per-user FSKit broker. It holds an
+    /// in-memory cache of XPC connections to sibling helpers; when
+    /// we kill an orphan appex, sibling helpers can be torn down by
+    /// runningboard but the broker's cache still references their
+    /// PIDs. Subsequent spawn attempts then fail with `Cocoa 4099 /
+    /// "connection to service with pid <N> was invalidated"`.
+    /// `fskit_agent` is a launchd user service
+    /// (`com.apple.fskit.fskit_agent`); kicking it forces fresh XPC
+    /// state on next demand. Returns 1 if a process was signalled.
+    static func killFSKitAgent() -> Int {
+        let log = Logger(subsystem: TestFSConstants.logSubsystem, category: "fskit-agent-kill")
+        let result = ShellRunner.run("/usr/bin/pkill", ["-x", "fskit_agent"])
+        if result.exit == 0 {
+            log.info("killed fskit_agent to flush per-user XPC cache")
+            return 1
+        }
+        return 0
+    }
 }
