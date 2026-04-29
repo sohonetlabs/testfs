@@ -59,8 +59,7 @@ final class TestFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations {
             let mountOptions = try MountOptions.load(from: sidecarURL)
             let configPath = mountOptions.config!
             let treeData = try Data(contentsOf: URL(fileURLWithPath: configPath), options: .mappedIfSafe)
-            let tree = try JSONTree.load(from: treeData)
-            let index = try TreeBuilder.build(root: tree, options: mountOptions)
+            let index = try TreeBuilder.parseAndBuild(treeJSON: treeData, options: mountOptions)
             let volume = TestFSVolume(index: index, options: mountOptions)
             containerStatus = .ready
             let nodeCount = index.nodesByID.count
