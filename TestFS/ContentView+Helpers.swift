@@ -45,24 +45,35 @@ enum AppEnvironment {
     /// stamp doesn't match `versionLabel`, this re-runs every launch.
     ///
     /// All four commands run as the user, no admin required.
-    static func performReregisterIfNeeded() {
+    /// Returns `true` when every step exited 0 within its timeout.
+    /// A `false` return triggers `ExtensionReregistration` to clear
+    /// its memoized task so a later mount click can retry instead
+    /// of awaiting a wedged result forever.
+    @discardableResult
+    static func performReregisterIfNeeded() -> Bool {
         let last = UserDefaults.standard.string(forKey: "verifiedMountedVersion") ?? ""
-        guard versionLabel != last else { return }
+        guard versionLabel != last else { return true }
 
         let appBundle = Bundle.main.bundleURL
         let appex = appBundle.appendingPathComponent(
             "Contents/Extensions/TestFSExtension.appex")
-        guard FileManager.default.fileExists(atPath: appex.path) else { return }
+        guard FileManager.default.fileExists(atPath: appex.path) else { return false }
 
         let lsregister = "/System/Library/Frameworks/CoreServices.framework"
             + "/Versions/A/Frameworks/LaunchServices.framework"
             + "/Versions/A/Support/lsregister"
         let bundleID = TestFSConstants.extensionBundleID
-        runSilently(lsregister, ["-f", appBundle.path])
-        runSilently("/usr/bin/pluginkit", ["-a", appex.path])
-        runSilently("/usr/bin/pluginkit", ["-e", "ignore", "-i", bundleID])
-        runSilently("/usr/bin/pluginkit", ["-e", "use", "-i", bundleID])
+        let ok1 = runSilently(lsregister, ["-f", appBundle.path])
+        let ok2 = runSilently("/usr/bin/pluginkit", ["-a", appex.path])
+        let ok3 = runSilently("/usr/bin/pluginkit", ["-e", "ignore", "-i", bundleID])
+        let ok4 = runSilently("/usr/bin/pluginkit", ["-e", "use", "-i", bundleID])
+        return ok1 && ok2 && ok3 && ok4
     }
+
+    /// 5s per command. Real `lsregister`/`pluginkit` runs finish in
+    /// well under a second; a longer wait means the system process
+    /// is wedged and we should fail loud rather than block the actor.
+    private static let subprocessTimeout: TimeInterval = 5.0
 
     @discardableResult
     private static func runSilently(_ tool: String, _ args: [String]) -> Bool {
@@ -71,13 +82,21 @@ enum AppEnvironment {
         proc.arguments = args
         proc.standardOutput = FileHandle.nullDevice
         proc.standardError = FileHandle.nullDevice
+        let done = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in done.signal() }
         do {
             try proc.run()
-            proc.waitUntilExit()
-            return proc.terminationStatus == 0
         } catch {
             return false
         }
+        if done.wait(timeout: .now() + subprocessTimeout) == .timedOut {
+            // SIGTERM the wedged child so the actor can move on. The
+            // termination handler will eventually fire as the process
+            // exits, but we don't wait for it.
+            proc.terminate()
+            return false
+        }
+        return proc.terminationStatus == 0
     }
 }
 
@@ -87,9 +106,13 @@ enum AppEnvironment {
 /// has finished before invoking `mount(8)` — without it the
 /// app-init kickoff and the user's first Mount click race, and
 /// extensionkitd can resolve a stale UUID.
+///
+/// On failure (a subprocess timed out, or any step exited non-zero)
+/// the cached task is cleared so the next mount click retries
+/// instead of awaiting a wedged result forever.
 actor ExtensionReregistration {
     static let shared = ExtensionReregistration()
-    private var task: Task<Void, Never>?
+    private var task: Task<Bool, Never>?
 
     func ensureCompleted() async {
         if task == nil {
@@ -97,7 +120,10 @@ actor ExtensionReregistration {
                 AppEnvironment.performReregisterIfNeeded()
             }
         }
-        await task?.value
+        let success = await task?.value ?? false
+        if !success {
+            task = nil
+        }
     }
 }
 
