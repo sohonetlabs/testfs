@@ -20,13 +20,24 @@ enum ShellRunner {
     private static let drainQueue = DispatchQueue(
         label: "shellrunner.drain", attributes: .concurrent)
 
-    static func run(_ path: String, _ args: [String]) -> Result {
+    /// Default ceiling for any single subprocess. A wait longer than
+    /// this means the system process is wedged and the caller should
+    /// fail loud rather than block its actor.
+    static let defaultTimeout: TimeInterval = 30.0
+
+    static func run(
+        _ path: String,
+        _ args: [String],
+        timeout: TimeInterval = defaultTimeout
+    ) -> Result {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
         proc.arguments = args
         let outPipe = Pipe(), errPipe = Pipe()
         proc.standardOutput = outPipe
         proc.standardError = errPipe
+        let exitSem = DispatchSemaphore(value: 0)
+        proc.terminationHandler = { _ in exitSem.signal() }
         do { try proc.run() } catch {
             return Result(exit: -1, stdout: "", stderr: error.localizedDescription)
         }
@@ -42,7 +53,24 @@ enum ShellRunner {
             errData = errPipe.fileHandleForReading.readDataToEndOfFile()
             group.leave()
         }
-        proc.waitUntilExit()
+        if exitSem.wait(timeout: .now() + timeout) == .timedOut {
+            // SIGTERM first; if the child traps it (or is stuck in
+            // uninterruptible I/O), the pipes stay open and the drain
+            // reads block forever — defeating the timeout. Escalate
+            // to SIGKILL after 2s, then bound the drain wait so
+            // group.wait can't itself hang.
+            proc.terminate()
+            if exitSem.wait(timeout: .now() + 2.0) == .timedOut {
+                kill(proc.processIdentifier, SIGKILL)
+                _ = exitSem.wait(timeout: .now() + 1.0)
+            }
+            _ = group.wait(timeout: .now() + 1.0)
+            return Result(
+                exit: -1,
+                stdout: String(data: outData, encoding: .utf8) ?? "",
+                stderr: "ShellRunner: \(path) timed out after \(timeout)s"
+            )
+        }
         group.wait()
         return Result(
             exit: proc.terminationStatus,
