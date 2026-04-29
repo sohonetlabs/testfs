@@ -52,7 +52,7 @@ enum AppEnvironment {
     /// of awaiting a wedged result forever.
     /// Path to the private LaunchServices `lsregister` binary, used by
     /// both `performReregisterIfNeeded` and `sweepStaleRegistrations`.
-    private static let lsregisterPath =
+    static let lsregisterPath =
         "/System/Library/Frameworks/CoreServices.framework"
         + "/Versions/A/Frameworks/LaunchServices.framework"
         + "/Versions/A/Support/lsregister"
@@ -66,12 +66,20 @@ enum AppEnvironment {
         // registrations turn into "extensionKit error 2 / testfs not
         // found" mount failures even with a clean install. See #68.
         let sweptCount = sweepStaleRegistrations()
+        // Kill any orphan TestFSExtension process from before the
+        // upgrade. Sparkle's bundle replace doesn't terminate live
+        // ExtensionKit instances, and pluginkit's toggle cycle can
+        // leave the old PID alive holding a stale UUID — extensionkitd
+        // then refuses to start a fresh instance with Cocoa 4099. See #70.
+        let orphansKilled = killOrphanExtensionProcesses()
         let last = UserDefaults.standard.string(forKey: "verifiedMountedVersion") ?? ""
-        // Toggle when the version changed (post-update) OR the sweep
-        // removed anything: extensionkitd may still have a UUID cached
-        // against a now-unregistered bundle, and only the ignore→use
-        // cycle drops that cache.
-        guard versionLabel != last || sweptCount > 0 else { return true }
+        // Toggle when the version changed (post-update), the sweep
+        // removed anything, or we just killed an orphan: extensionkitd
+        // may still have a UUID cached against the just-cleared state,
+        // and only the ignore→use cycle drops that cache.
+        guard versionLabel != last || sweptCount > 0 || orphansKilled > 0 else {
+            return true
+        }
 
         let appBundle = Bundle.main.bundleURL
         let appex = appBundle.appendingPathComponent(
@@ -87,32 +95,27 @@ enum AppEnvironment {
     }
 
     /// Sweep stale LaunchServices registrations for our host bundle
-    /// ID, keeping only the running bundle's path. `lsregister -u`
-    /// on an app bundle cascades to its embedded appex, so we don't
-    /// enumerate the extension's bundle ID separately.
-    ///
-    /// Returns the count of removed paths. Called every launch from
-    /// `performReregisterIfNeeded`; a non-zero return triggers the
-    /// extensionkitd toggle cycle even when the host version is
-    /// unchanged.
+    /// ID, keeping only the running bundle's path. Enumerates via
+    /// `lsregister -dump` parsing rather than `urlsForApplications`
+    /// because the latter filters out registrations whose underlying
+    /// file no longer exists (unmounted DMGs, deleted Trash items) —
+    /// which are exactly the entries most likely to confuse
+    /// extensionkitd's UUID resolution. `lsregister -u` on a host
+    /// bundle cascades to the embedded appex, so the extension's
+    /// bundle ID isn't enumerated separately.
     @discardableResult
     static func sweepStaleRegistrations() -> Int {
         let log = Logger(subsystem: TestFSConstants.logSubsystem, category: "lsregister-sweep")
         guard let bundleID = Bundle.main.bundleIdentifier else { return 0 }
-        // Resolve symlinks: Gatekeeper translocation, /var ↔ /private/var,
-        // and bind-mount paths can otherwise produce false mismatches
-        // when comparing the same physical bundle.
         let canonical = Bundle.main.bundleURL.resolvingSymlinksInPath().path
-        let stale = NSWorkspace.shared
-            .urlsForApplications(withBundleIdentifier: bundleID)
-            .filter { $0.resolvingSymlinksInPath().path != canonical }
-        guard !stale.isEmpty else { return 0 }
-        let stalePaths = stale.map(\.path)
+        let stalePaths = registeredPaths(forBundleID: bundleID)
+            .filter { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path != canonical }
+        guard !stalePaths.isEmpty else { return 0 }
         for path in stalePaths {
             log.info("sweeping stale registration: \(path, privacy: .public)")
         }
-        // `lsregister -u` accepts N paths per invocation, so batch all
-        // stale removals into one subprocess to amortize fork+exec.
+        // `lsregister -u` accepts N paths per invocation; batching
+        // amortizes fork+exec across long stale lists.
         let batchOK = runSilently(lsregisterPath, ["-u"] + stalePaths)
         if batchOK {
             log.info("sweep removed \(stalePaths.count, privacy: .public) stale path(s)")
