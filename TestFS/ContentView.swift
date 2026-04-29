@@ -278,23 +278,15 @@ struct ContentView: View {
     private func unmount(_ record: MountRecord) async {
         busy = true; defer { busy = false }
         status = "unmounting \(record.mountpoint)…"
-        do {
-            try await MountManager.shared.unmount(at: record.mountpoint)
-        } catch {
+        switch await MountManager.shared.unmountAndForget(record) {
+        case .ok:
+            status = "unmounted \(record.mountpoint)"
+        case .umountFailed(let error):
             status = "umount failed: \(error.localizedDescription)"
-            return
-        }
-        do {
-            try await MountManager.shared.detach(bsdName: record.bsdName)
-        } catch {
+        case .detachFailed(let error):
             status = "unmounted, but detach failed: \(error.localizedDescription)"
-            await MountRegistry.shared.forget(bsdName: record.bsdName)
-            mounts = await MountRegistry.shared.snapshot()
-            return
         }
-        await MountRegistry.shared.forget(bsdName: record.bsdName)
         mounts = await MountRegistry.shared.snapshot()
-        status = "unmounted \(record.mountpoint)"
     }
 
     private func refresh() async {
