@@ -170,7 +170,8 @@ func parseSize(_ raw: String) -> Int? {
         body = Substring(raw)
     }
     guard let value = Int(body), value > 0 else { return nil }
-    return value * scalar
+    let (result, overflow) = value.multipliedReportingOverflow(by: scalar)
+    return overflow ? nil : result
 }
 
 extension MountOptions {
