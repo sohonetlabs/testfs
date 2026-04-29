@@ -229,6 +229,27 @@ final class MountOptionsTests: XCTestCase {
         XCTAssertNil(parseSize("-1K"))
     }
 
+    /// Issue #19: a value that parses as `Int` but overflows when
+    /// multiplied by the suffix scalar must return nil, not trap.
+    /// Reachable from the GUI's Advanced Options block-size field.
+    func testParseSizeReturnsNilOnSuffixMultiplyOverflow() {
+        // Int.max with a unit suffix overflows the Int multiply.
+        let intMax = String(Int.max)
+        XCTAssertNil(parseSize("\(intMax)K"))
+        XCTAssertNil(parseSize("\(intMax)M"))
+        XCTAssertNil(parseSize("\(intMax)G"))
+        // Smallest K-suffixed value that overflows.
+        let firstOverflowingK = (Int.max / 1024) + 1
+        XCTAssertNil(parseSize("\(firstOverflowingK)K"))
+    }
+
+    /// Boundary case: the largest K-suffixed value that fits in Int
+    /// must still parse correctly.
+    func testParseSizeAcceptsLargestRepresentableSuffixedValue() {
+        let maxK = Int.max / 1024
+        XCTAssertEqual(parseSize("\(maxK)K"), maxK * 1024)
+    }
+
     // MARK: - round-trip
 
     func testRoundTripEncodesAllFields() throws {
