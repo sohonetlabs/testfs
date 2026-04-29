@@ -127,9 +127,10 @@ enum JSONTree {
         let type: String
     }
 
-    /// Internal wrapper that decodes only the first element of the top-level
-    /// array, in a single pass. Remaining entries (report, extra directories)
-    /// are left untouched by the decoder.
+    /// Decodes the top-level array. Element 0 must be a `directory`;
+    /// trailing entries must be `report` summaries. Anything else
+    /// (stray dirs/files) is rejected so malformed input can't be
+    /// silently mounted as a partial tree.
     private struct TopLevel: Decodable {
         let root: TreeNode
 
@@ -138,16 +139,19 @@ enum JSONTree {
             guard !arr.isAtEnd else {
                 throw LoadError.emptyArray
             }
-            // Peek element 0's type via a minimal header so we can surface
-            // firstEntryNotDirectory as a distinct error instead of a
-            // generic DecodingError, then decode the same element as a
-            // full TreeNode.
             let first = try arr.superDecoder()
             let header = try TopLevelHeader(from: first)
             guard header.type == NodeType.directory.rawValue else {
                 throw LoadError.firstEntryNotDirectory(foundType: header.type)
             }
             self.root = try TreeNode(from: first)
+            while !arr.isAtEnd {
+                let trailing = try arr.superDecoder()
+                let header = try TopLevelHeader(from: trailing)
+                guard header.type == NodeType.report.rawValue else {
+                    throw LoadError.unexpectedTrailingEntry(foundType: header.type)
+                }
+            }
         }
     }
 }
