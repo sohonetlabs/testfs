@@ -275,10 +275,12 @@ final class MountOptionsTests: XCTestCase {
             gid: 1000,
             mtime: "2019-06-01",
             ignoreAppledouble: true,
-            addMacosCacheFiles: false
+            addMacosCacheFiles: false,
+            attemptToken: "11111111-2222-3333-4444-555555555555"
         )
         let encoded = try JSONEncoder().encode(original)
         let decoded = try MountOptions.load(from: encoded)
         XCTAssertEqual(decoded, original)
     }
+
 }

@@ -39,6 +39,7 @@ let package = Package(
             ],
             sources: [
                 "TestFSExtension/JSONTree.swift",
+                "TestFSExtension/LoadFailureMarker.swift",
                 "TestFSExtension/MountOptions.swift",
                 "TestFSExtension/TreeIndex.swift",
                 "TestFSExtension/TreeBuilder.swift",
