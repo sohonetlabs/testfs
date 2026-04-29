@@ -25,6 +25,17 @@ enum Log {
     static let stats = Logger(subsystem: Identity.subsystem, category: "stats")
 }
 
+/// Decoder shape used by `peekAttemptToken` to read just the
+/// `attempt_token` field out of a sidecar without running the full
+/// `MountOptions.load` validation. Lifted out of `peekAttemptToken`
+/// so its CodingKeys enum doesn't push nesting past 1 level.
+private struct SidecarTokenPeek: Decodable {
+    let attemptToken: String?
+    enum CodingKeys: String, CodingKey {
+        case attemptToken = "attempt_token"
+    }
+}
+
 final class TestFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations {
     func probeResource(
         resource: FSResource,
@@ -54,8 +65,14 @@ final class TestFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations {
         }
         let bsd = block.bsdName
         Log.mount.info("loadResource starting for \(bsd, privacy: .public)")
+        let sidecarURL = MountOptions.sidecarURL(forBSDName: bsd)
+        // Peek the attempt token from the raw sidecar before any
+        // validation can fail. Marker JSON carries the token even when
+        // MountOptions.load itself throws (malformed sidecar, missing
+        // config), so the host's filter still accepts those markers
+        // for the current attempt.
+        let attemptToken = Self.peekAttemptToken(at: sidecarURL)
         do {
-            let sidecarURL = MountOptions.sidecarURL(forBSDName: bsd)
             let mountOptions = try MountOptions.load(from: sidecarURL)
             let configPath = mountOptions.config!
             let treeData = try Data(contentsOf: URL(fileURLWithPath: configPath), options: .mappedIfSafe)
@@ -75,7 +92,9 @@ final class TestFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations {
             let markerURL = MountOptions.failureMarkerURL(forBSDName: bsd)
             do {
                 let data = try JSONEncoder().encode(
-                    LoadFailureMarker(error: error.localizedDescription))
+                    LoadFailureMarker(
+                        error: error.localizedDescription,
+                        attemptToken: attemptToken))
                 try data.write(to: markerURL, options: .atomic)
             } catch {
                 Log.mount.error(
@@ -84,6 +103,16 @@ final class TestFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations {
             Log.mount.error("loadResource failed: \(error.localizedDescription, privacy: .public)")
             replyHandler(nil, error)
         }
+    }
+
+    /// Decodes only the `attempt_token` field, ignoring everything
+    /// else. Returns nil if the sidecar is unreadable or its JSON
+    /// can't be parsed at all — the marker still gets written without
+    /// a token, which the host's filter will reject (matching the
+    /// pre-token behavior for malformed sidecars).
+    private static func peekAttemptToken(at url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return (try? JSONDecoder().decode(SidecarTokenPeek.self, from: data))?.attemptToken
     }
 
     /// Deterministic container ID from the BSD name, so a re-probe of the

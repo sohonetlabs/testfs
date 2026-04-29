@@ -6,6 +6,9 @@
 //  Defaults match Python jsonfs.py's CLI defaults.
 //
 
+// swiftlint:disable file_length
+// Codable-conformance split deferred — keep this commit focused.
+
 import Foundation
 
 /// Identity strings shared by host and extension.
@@ -92,6 +95,9 @@ struct MountOptions: Equatable, Sendable {
     /// to silence the periodic line.
     var reportStats: Bool
 
+    /// Per-attempt token echoed back by the extension into any
+    /// failure marker — see `LoadFailureMarker`.
+    var attemptToken: String?
     init(
         config: String? = nil,
         fillChar: String = "\u{0000}",
@@ -109,7 +115,8 @@ struct MountOptions: Equatable, Sendable {
         addMacosCacheFiles: Bool = true,
         volumeName: String? = nil,
         verbose: Bool = false,
-        reportStats: Bool = true
+        reportStats: Bool = true,
+        attemptToken: String? = nil
     ) {
         self.config = config
         self.fillChar = fillChar
@@ -128,6 +135,7 @@ struct MountOptions: Equatable, Sendable {
         self.volumeName = volumeName
         self.verbose = verbose
         self.reportStats = reportStats
+        self.attemptToken = attemptToken
     }
 }
 
@@ -224,6 +232,11 @@ extension MountOptions {
         case volumeName = "volume_name"
         case verbose
         case reportStats = "report_stats"
+        // The "attempt_token" string is also referenced in
+        // LoadFailureMarker.CodingKeys and TestFileSystem.SidecarTokenPeek;
+        // CodingKey raw values must be string literals, so a rename
+        // has to touch all three.
+        case attemptToken = "attempt_token"
     }
 
     /// Python-CLI defaults, used both as `.default` and as the fallback
@@ -261,7 +274,8 @@ extension MountOptions: Codable {
                 ?? defaults.addMacosCacheFiles,
             volumeName: try container.decodeIfPresent(String.self, forKey: .volumeName),
             verbose: try container.decodeIfPresent(Bool.self, forKey: .verbose) ?? defaults.verbose,
-            reportStats: try container.decodeIfPresent(Bool.self, forKey: .reportStats) ?? defaults.reportStats
+            reportStats: try container.decodeIfPresent(Bool.self, forKey: .reportStats) ?? defaults.reportStats,
+            attemptToken: try container.decodeIfPresent(String.self, forKey: .attemptToken)
         )
     }
 
@@ -284,14 +298,8 @@ extension MountOptions: Codable {
         try container.encodeIfPresent(volumeName, forKey: .volumeName)
         try container.encode(verbose, forKey: .verbose)
         try container.encode(reportStats, forKey: .reportStats)
+        try container.encodeIfPresent(attemptToken, forKey: .attemptToken)
     }
-}
-
-/// Shape of the failure-marker JSON the extension writes on
-/// `loadResource` error so the host can decode the underlying
-/// reason instead of polling blind for the full timeout.
-struct LoadFailureMarker: Codable {
-    let error: String
 }
 
 extension MountOptions {

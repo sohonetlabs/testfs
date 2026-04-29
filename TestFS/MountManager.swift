@@ -20,6 +20,10 @@ actor MountManager {
 
     struct PrepareResult {
         let devNodePath: String
+        /// Token written into the staged sidecar; used by the host's
+        /// marker filter so a stale marker from a prior /dev/diskN
+        /// attempt can't trigger rollback for this one.
+        let attemptToken: String
         var bsdName: String { .bsdName(fromDevNode: devNodePath) }
     }
 
@@ -80,6 +84,13 @@ actor MountManager {
 
             var sidecarOptions = options
             sidecarOptions.config = paths.tree.path
+            // Per-attempt token: extension writes the same value into
+            // any failure marker, host filters markers on token match.
+            // Defends against a slow-failing prior loadResource on a
+            // reused /dev/diskN (and subsequent BSD) writing a marker
+            // after stage-time delete.
+            let attemptToken = UUID().uuidString
+            sidecarOptions.attemptToken = attemptToken
             let sidecar = try Self.sidecarEncoder.encode(sidecarOptions)
             try sidecar.write(to: paths.sidecar, options: .atomic)
 
@@ -87,7 +98,7 @@ actor MountManager {
             try? FileManager.default.removeItem(at: failureMarkerURL(forBSD: bsd))
 
             log.info("prepareMount: \(bsd, privacy: .public)")
-            return PrepareResult(devNodePath: dev)
+            return PrepareResult(devNodePath: dev, attemptToken: attemptToken)
         } catch {
             if let dev = devNode { try? hdiutilDetach(devNode: dev) }
             if let img = imageURL { try? FileManager.default.removeItem(at: img) }
@@ -169,10 +180,18 @@ actor MountManager {
     }
 
     /// Read the extension-written failure marker. Returns the error
-    /// reason, or nil if the marker doesn't exist or is malformed.
-    fileprivate static func readFailureMarker(at url: URL) -> String? {
+    /// reason only when the marker's `attemptToken` matches the one
+    /// staged into the current attempt's sidecar. Mismatches mean the
+    /// marker was written by a prior loadResource that was still
+    /// unwinding when /dev/diskN got reused — ignoring those prevents
+    /// false rollback of a fresh mount.
+    fileprivate static func readFailureMarker(at url: URL, expecting token: String) -> String? {
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(LoadFailureMarker.self, from: data).error
+        guard let marker = try? JSONDecoder().decode(LoadFailureMarker.self, from: data) else {
+            return nil
+        }
+        guard marker.attemptToken == token else { return nil }
+        return marker.error
     }
 
     // MARK: - hdiutil / mkfile
@@ -300,7 +319,7 @@ actor MountManager {
             if Self.statfsType(at: mountpoint) == TestFSConstants.fstype {
                 return .mounted
             }
-            if let reason = Self.readFailureMarker(at: markerURL) {
+            if let reason = Self.readFailureMarker(at: markerURL, expecting: prep.attemptToken) {
                 return .failed(reason: reason)
             }
             try? await Task.sleep(for: Self.mountConfirmPollInterval)
