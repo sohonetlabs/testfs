@@ -198,12 +198,9 @@ struct ContentView: View {
     private func mountSelected() async {
         guard let json = pickedJSON, let mnt = pickedMountpoint else { return }
         busy = true; defer { busy = false }
-
-        if MountTable.isMountpoint(mnt.path) {
-            alreadyMountedPath = mnt.path
-            return
-        }
-
+        guard !recordIfAlreadyMounted(at: mnt.path) else { return }
+        // Don't race app-init's re-registration kickoff.
+        await ExtensionReregistration.shared.ensureCompleted()
         status = "mounting \(json.lastPathComponent) at \(mnt.path)…"
 
         let accessing = json.startAccessingSecurityScopedResource()
@@ -258,6 +255,14 @@ struct ContentView: View {
         await recordSuccessfulMount(
             prep: prep, mountpoint: mnt.path,
             sourceJSON: json.path, volumeName: toMount.volumeName)
+    }
+
+    private func recordIfAlreadyMounted(at path: String) -> Bool {
+        if MountTable.isMountpoint(path) {
+            alreadyMountedPath = path
+            return true
+        }
+        return false
     }
 
     private func recordSuccessfulMount(
