@@ -52,7 +52,7 @@ extension TestFSVolume: FSVolume.Operations {
     }
 
     var volumeStatistics: FSStatFSResult {
-        let blockSize = 4096
+        let blockSize = TreeBuilder.volumeStatBlockSize
         let totalBlocks = (totalFileBytes + UInt64(blockSize) - 1) / UInt64(blockSize)
         let result = FSStatFSResult(fileSystemTypeName: Identity.name)
         result.blockSize = blockSize

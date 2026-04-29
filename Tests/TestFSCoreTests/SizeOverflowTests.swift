@@ -5,7 +5,7 @@
 //  blocks (see `TestFSVolume.volumeStatistics`); the addition overflows
 //  once `totalFileBytes` passes `UInt64.max - 4095`. TreeBuilder
 //  rejects oversized inputs at build time so the volume layer can
-//  rely on the math. Issue #18.
+//  rely on the math.
 //
 
 import XCTest
@@ -20,6 +20,21 @@ final class SizeOverflowTests: XCTestCase {
         return opts
     }
 
+    private func assertThrowsTotalSizeOverflow(
+        _ root: TreeNode, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertThrowsError(
+            try TreeBuilder.build(root: root, options: defaultOptions()),
+            file: file, line: line
+        ) { error in
+            guard let err = error as? TreeBuilder.BuildError,
+                case .totalSizeOverflow = err
+            else {
+                return XCTFail("expected .totalSizeOverflow, got \(error)", file: file, line: line)
+            }
+        }
+    }
+
     func testMaxAcceptedFileSizePreserved() throws {
         let max = TreeBuilder.maxTotalFileBytes
         let root: TreeNode = .directory(
@@ -30,32 +45,18 @@ final class SizeOverflowTests: XCTestCase {
     }
 
     func testBuildRejectsUInt64MaxFile() {
-        let root: TreeNode = .directory(
+        assertThrowsTotalSizeOverflow(.directory(
             name: "r",
-            contents: [.file(name: "huge", size: UInt64.max)])
-        XCTAssertThrowsError(try TreeBuilder.build(root: root, options: defaultOptions())) { error in
-            guard let err = error as? TreeBuilder.BuildError,
-                case .totalSizeOverflow = err
-            else {
-                return XCTFail("expected .totalSizeOverflow, got \(error)")
-            }
-        }
+            contents: [.file(name: "huge", size: UInt64.max)]))
     }
 
     func testBuildRejectsAccumulatedSizeOverflow() {
         let half = UInt64.max / 2 + 1
-        let root: TreeNode = .directory(
+        assertThrowsTotalSizeOverflow(.directory(
             name: "r",
             contents: [
                 .file(name: "a", size: half),
                 .file(name: "b", size: half)
-            ])
-        XCTAssertThrowsError(try TreeBuilder.build(root: root, options: defaultOptions())) { error in
-            guard let err = error as? TreeBuilder.BuildError,
-                case .totalSizeOverflow = err
-            else {
-                return XCTFail("expected .totalSizeOverflow, got \(error)")
-            }
-        }
+            ]))
     }
 }

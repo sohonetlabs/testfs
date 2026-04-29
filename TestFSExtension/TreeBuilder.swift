@@ -29,10 +29,8 @@ enum TreeBuilder {
         /// (e.g. NFC `é` and NFD `é` under `unicode_normalization=nfd`).
         case duplicateName(directory: String, name: String)
 
-        /// Adding this file's size would overflow the running
-        /// `totalFileBytes` accumulator or the volume's reported
-        /// block-count math. Reject at build time so the volume layer
-        /// can rely on `totalFileBytes + 4095` not overflowing.
+        /// Adding this file's size would push past
+        /// `maxTotalFileBytes`. See that constant for why.
         case totalSizeOverflow(directory: String, name: String)
 
         var errorDescription: String? {
@@ -46,11 +44,17 @@ enum TreeBuilder {
         }
     }
 
-    /// Volume statistics report `(totalFileBytes + 4095) / 4096`
-    /// blocks (see `TestFSVolume.volumeStatistics`); the addition
-    /// overflows once `totalFileBytes` passes this cap. Build-time
-    /// rejection here means the volume layer can rely on the math.
-    static let maxTotalFileBytes: UInt64 = UInt64.max - 4095
+    /// Block size `TestFSVolume.volumeStatistics` reports in `statfs`.
+    /// Owned here because `maxTotalFileBytes` is derived from it; both
+    /// values must stay coupled.
+    static let volumeStatBlockSize: Int = 4096
+
+    /// Volume statistics report `(totalFileBytes + blockSize - 1) /
+    /// blockSize` blocks; the addition overflows once `totalFileBytes`
+    /// passes this cap. Build-time rejection lets the volume layer
+    /// rely on the math.
+    static let maxTotalFileBytes: UInt64 =
+        UInt64.max - UInt64(volumeStatBlockSize - 1)
 
     /// Mutable state threaded through the recursive walk. Pulled into
     /// a struct so individual visit/visitDirectory steps stay short
@@ -86,7 +90,7 @@ enum TreeBuilder {
             let name = ctx.options.unicodeNormalization.apply(to: rawName)
             let (newTotal, overflow) = ctx.totalFileBytes.addingReportingOverflow(size)
             guard !overflow, newTotal <= Self.maxTotalFileBytes else {
-                let dir = parentID.map { displayPath(of: $0, nodesByID: ctx.nodesByID) } ?? ""
+                let dir = parentID.map { displayPath(of: $0, nodesByID: ctx.nodesByID) } ?? "<root>"
                 throw BuildError.totalSizeOverflow(directory: dir, name: rawName)
             }
             ctx.totalFileBytes = newTotal
@@ -164,7 +168,8 @@ enum TreeBuilder {
     /// Reconstruct a display path from root to the given directory id
     /// by walking the parent chain. The id itself plus all ancestors
     /// must already be in `nodesByID` — `visit` inserts a placeholder
-    /// before recursing to guarantee this.
+    /// before recursing to guarantee this. Falls back to `<root>` so
+    /// error messages don't render a bare empty path.
     private static func displayPath(
         of id: TreeNodeID,
         nodesByID: [TreeNodeID: TreeIndex.Node]
@@ -175,7 +180,8 @@ enum TreeBuilder {
             components.append(node.name)
             cursor = node.parentID
         }
-        return components.reversed().joined(separator: "/")
+        let path = components.reversed().joined(separator: "/")
+        return path.isEmpty ? "<root>" : path
     }
 
 }
