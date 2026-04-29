@@ -46,12 +46,19 @@ enum TreeBuilder {
         }
     }
 
+    /// Volume statistics report `(totalFileBytes + 4095) / 4096`
+    /// blocks (see `TestFSVolume.volumeStatistics`); the addition
+    /// overflows once `totalFileBytes` passes this cap. Build-time
+    /// rejection here means the volume layer can rely on the math.
+    static let maxTotalFileBytes: UInt64 = UInt64.max - 4095
+
     /// Mutable state threaded through the recursive walk. Pulled into
     /// a struct so individual visit/visitDirectory steps stay short
     /// enough to satisfy SwiftLint's function_body_length budget.
     fileprivate struct Context {
         var nodesByID: [TreeNodeID: TreeIndex.Node] = [:]
         var nextID: TreeNodeID = 1
+        var totalFileBytes: UInt64 = 0
         let options: MountOptions
     }
 
@@ -77,6 +84,12 @@ enum TreeBuilder {
         switch node {
         case .file(let rawName, let size):
             let name = ctx.options.unicodeNormalization.apply(to: rawName)
+            let (newTotal, overflow) = ctx.totalFileBytes.addingReportingOverflow(size)
+            guard !overflow, newTotal <= Self.maxTotalFileBytes else {
+                let dir = parentID.map { displayPath(of: $0, nodesByID: ctx.nodesByID) } ?? ""
+                throw BuildError.totalSizeOverflow(directory: dir, name: rawName)
+            }
+            ctx.totalFileBytes = newTotal
             ctx.nodesByID[id] = TreeIndex.Node(
                 id: id, parentID: parentID, name: name,
                 kind: .file, size: size,

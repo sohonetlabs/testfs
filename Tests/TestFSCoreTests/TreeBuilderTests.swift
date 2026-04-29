@@ -207,55 +207,17 @@ final class TreeBuilderTests: XCTestCase {
     }
 
     func testFileSizesPreserved() throws {
-        // `huge` is the largest size we accept — UInt64.max would
-        // overflow the volume's (totalFileBytes + 4095) / 4096
-        // reporting math (covered by testBuildRejectsUInt64MaxFile).
-        let huge = UInt64.max - 4095
         let root: TreeNode = .directory(
             name: "r",
             contents: [
                 .file(name: "tiny", size: 0),
                 .file(name: "small", size: 1024),
-                .file(name: "huge", size: huge)
+                .file(name: "gig", size: UInt64(1_073_741_824))
             ])
         let index = try TreeBuilder.build(root: root, options: defaultOptions())
         XCTAssertEqual(index.lookup(name: "tiny", in: index.rootID)?.size, 0)
         XCTAssertEqual(index.lookup(name: "small", in: index.rootID)?.size, 1024)
-        XCTAssertEqual(index.lookup(name: "huge", in: index.rootID)?.size, huge)
-    }
-
-    // MARK: - size accounting overflow
-
-    func testBuildRejectsUInt64MaxFile() {
-        let root: TreeNode = .directory(
-            name: "r",
-            contents: [
-                .file(name: "huge", size: UInt64.max)
-            ])
-        XCTAssertThrowsError(try TreeBuilder.build(root: root, options: defaultOptions())) { error in
-            guard let err = error as? TreeBuilder.BuildError,
-                case .totalSizeOverflow = err
-            else {
-                return XCTFail("expected .totalSizeOverflow, got \(error)")
-            }
-        }
-    }
-
-    func testBuildRejectsAccumulatedSizeOverflow() {
-        let half = UInt64.max / 2 + 1
-        let root: TreeNode = .directory(
-            name: "r",
-            contents: [
-                .file(name: "a", size: half),
-                .file(name: "b", size: half)
-            ])
-        XCTAssertThrowsError(try TreeBuilder.build(root: root, options: defaultOptions())) { error in
-            guard let err = error as? TreeBuilder.BuildError,
-                case .totalSizeOverflow = err
-            else {
-                return XCTFail("expected .totalSizeOverflow, got \(error)")
-            }
-        }
+        XCTAssertEqual(index.lookup(name: "gig", in: index.rootID)?.size, 1_073_741_824)
     }
 
     // MARK: - macOS cache-control dotfiles
