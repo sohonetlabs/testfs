@@ -54,9 +54,8 @@ extension AppEnvironment {
     /// ExtensionKit instances; the pluginkit toggle alone doesn't
     /// always reap them either. extensionkitd then refuses to spawn
     /// a fresh instance for the new bundle and the user gets
-    /// `Cocoa 4099 / NSXPCConnectionInvalid`. Returns 1 if at least
-    /// one process was signalled, 0 otherwise.
-    static func killOrphanExtensionProcesses() -> Int {
+    /// `Cocoa 4099 / NSXPCConnectionInvalid`.
+    static func killOrphanExtensionProcesses() {
         let log = Logger(subsystem: TestFSConstants.logSubsystem, category: "orphan-kill")
         let extensionBinary = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Extensions/TestFSExtension.appex")
@@ -65,8 +64,23 @@ extension AppEnvironment {
         let result = ShellRunner.run("/usr/bin/pkill", ["-f", extensionBinary])
         if result.exit == 0 {
             log.info("killed orphan TestFSExtension process(es)")
-            return 1
         }
-        return 0
+    }
+
+    /// Kill `fskit_agent`, the per-user FSKit broker. It holds an
+    /// in-memory cache of XPC connections to sibling helpers; when
+    /// we kill an orphan appex, sibling helpers can be torn down by
+    /// runningboard but the broker's cache still references their
+    /// PIDs. Subsequent spawn attempts then fail with `Cocoa 4099 /
+    /// "connection to service with pid <N> was invalidated"`.
+    /// `fskit_agent` is a launchd user service
+    /// (`com.apple.fskit.fskit_agent`); kicking it forces fresh XPC
+    /// state on next demand.
+    static func killFSKitAgent() {
+        let log = Logger(subsystem: TestFSConstants.logSubsystem, category: "fskit-agent-kill")
+        let result = ShellRunner.run("/usr/bin/pkill", ["-x", "fskit_agent"])
+        if result.exit == 0 {
+            log.info("killed fskit_agent to flush per-user XPC cache")
+        }
     }
 }
