@@ -78,6 +78,15 @@ enum TreeBuilder {
         )
     }
 
+    /// Decode the tree JSON and build the index in one call. Both
+    /// the host's `prepareMount` pre-flight and the extension's
+    /// `loadResource` go through this so the two sites can't drift
+    /// on the validation contract.
+    static func parseAndBuild(treeJSON: Data, options: MountOptions) throws -> TreeIndex {
+        let root = try JSONTree.load(from: treeJSON)
+        return try build(root: root, options: options)
+    }
+
     /// Returns (id, normalized-name) so the caller doesn't have to
     /// re-look-up the just-inserted node when checking for collisions.
     private static func visit(

@@ -45,6 +45,13 @@ actor MountManager {
     /// owns only the mount-specific `config` field (= staged tree
     /// path) and sidecar serialization.
     func prepareMount(treeJSON: Data, options: MountOptions) throws -> PrepareResult {
+        // Pre-flight: surface JSON / TreeBuilder errors before
+        // allocating a dev node. Otherwise they only fire inside the
+        // extension's loadResource, and the host eats the full 15s
+        // confirmMountedOrRollback budget for what is a synchronous
+        // validation failure.
+        _ = try TreeBuilder.parseAndBuild(treeJSON: treeJSON, options: options)
+
         var imageURL: URL?
         var devNode: String?
         var stagedTree: URL?
