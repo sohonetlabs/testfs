@@ -2,10 +2,12 @@
 //  JSONTree.swift
 //  TestFSCore / TestFSExtension
 //
-//  Decoder for `tree -J -s` JSON output. Pure Swift, no FSKit imports,
-//  so it can be unit-tested via the SPM TestFSCore target while also
-//  being compiled into the Xcode FSKit extension target via the
-//  PBXFileSystemSynchronizedRootGroup.
+//  Decoder for `tree -J -s` JSON output.
+//
+//  Pure Swift — do NOT add `import FSKit` here. This file is
+//  dual-membership (TestFS host + TestFSExtension via pbxproj);
+//  FSKit isn't linked into the host target and an import would
+//  silently break the host build only on a clean rebuild.
 //
 
 import Foundation

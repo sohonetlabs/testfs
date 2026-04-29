@@ -2,13 +2,14 @@
 //  TreeIndex.swift
 //  TestFSCore / TestFSExtension
 //
-//  Pure-Swift representation of a parsed `tree -J -s` tree with stable
-//  monotonic IDs, preserved insertion order, and case-sensitive name
-//  lookup (matching the Python `jsonfs.py` upstream — see
-//  research/test_json_fs/jsonfs.py:_sanitize_path which never folds).
-//  TestFSVolume / TestFSItem (FSKit) wrap this at the next layer;
-//  TreeIndex itself has no FSKit dependency so it can be unit tested
-//  via `swift test`.
+//  Parsed `tree -J -s` tree with stable monotonic IDs, preserved
+//  insertion order, and case-sensitive name lookup (matching the
+//  Python `jsonfs.py` upstream).
+//
+//  Pure Swift — do NOT add `import FSKit` here. This file is
+//  dual-membership (TestFS host + TestFSExtension via pbxproj);
+//  FSKit isn't linked into the host target and an import would
+//  silently break the host build only on a clean rebuild.
 //
 
 import Foundation
