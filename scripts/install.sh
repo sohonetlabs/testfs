@@ -8,22 +8,23 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
-DERIVED_GLOB=~/Library/Developer/Xcode/DerivedData/TestFS-*/Build/Products/Debug/TestFS.app
 
-# Build if there's no existing DerivedData output.
-if ! ls $DERIVED_GLOB 1>/dev/null 2>&1; then
-    echo "No built TestFS.app found; running xcodebuild build..."
-    xcodebuild -project TestFS.xcodeproj \
-        -scheme TestFS \
-        -configuration Debug \
-        -destination 'platform=macOS' \
-        -allowProvisioningUpdates \
-        build
-fi
+# Always rebuild from the current checkout — the previous "skip if any
+# DerivedData exists" short-circuit could pick up an unrelated clone's
+# bundle from the shared `~/Library/Developer/Xcode/DerivedData/TestFS-*`
+# pool. Build into the repo's own derived path so SRC_APP is unambiguous.
+echo "Building TestFS into build/derived..."
+xcodebuild -project TestFS.xcodeproj \
+    -scheme TestFS \
+    -configuration Debug \
+    -destination 'platform=macOS' \
+    -derivedDataPath "$REPO/build/derived" \
+    -allowProvisioningUpdates \
+    build
 
-SRC_APP="$(ls -d $DERIVED_GLOB | head -1)"
+SRC_APP="$REPO/build/derived/Build/Products/Debug/TestFS.app"
 if [ ! -d "$SRC_APP" ]; then
-    echo "FAIL: could not locate built TestFS.app"
+    echo "FAIL: expected build output at $SRC_APP"
     exit 1
 fi
 
@@ -52,11 +53,10 @@ echo "Installing $SRC_APP to /Applications/TestFS.app"
 rm -rf /Applications/TestFS.app
 cp -R "$SRC_APP" /Applications/TestFS.app
 
-# Register only the /Applications copy. Unregister SRC_APP afterwards so
-# the just-built DerivedData bundle doesn't compete for the same
-# pluginkit fstype slot — that's exactly the duplication that bit us.
+# Register only the /Applications copy. SRC_APP under build/derived/
+# was already swept by the prune loop above, so it can't compete for
+# the same pluginkit fstype slot.
 "$LSREGISTER" -f /Applications/TestFS.app
-"$LSREGISTER" -u "$SRC_APP" 2>/dev/null || true
 
 APPEX=/Applications/TestFS.app/Contents/Extensions/TestFSExtension.appex
 if [ -d "$APPEX" ]; then

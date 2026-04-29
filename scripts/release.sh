@@ -122,7 +122,7 @@ echo ""
 echo "=== sparkle: sign update ==="
 # Multiple DerivedData dirs (TestFS-<hash>) can pile up if the project is
 # cloned to several paths. -td picks the most recently modified one, which
-# is the one the just-completed archive populated. Same idiom as install.sh.
+# is the one the just-completed archive populated.
 SPARKLE_BIN_GLOB=~/Library/Developer/Xcode/DerivedData/TestFS-*/SourcePackages/artifacts/sparkle/Sparkle/bin
 SPARKLE_BIN="$(ls -td $SPARKLE_BIN_GLOB 2>/dev/null | head -1)"
 if [ -z "$SPARKLE_BIN" ] || [ ! -x "$SPARKLE_BIN/sign_update" ]; then
