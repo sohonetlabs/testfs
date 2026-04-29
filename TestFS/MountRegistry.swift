@@ -41,17 +41,22 @@ actor MountRegistry {
     }
 
     /// Ground-truth from the kernel. Preserves source/volume metadata
-    /// only when both the BSD name AND the mountpoint match — `diskN`
-    /// values are recyclable, so the kernel can hand the same name
-    /// back out to a different mount. If the mountpoint flipped,
-    /// treat the row as new (the old `sourceJSON`/`volumeName` aren't
-    /// transferable to a different mount).
+    /// only when both the BSD name AND the canonical mountpoint match
+    /// — `diskN` values are recyclable, and `getfsstat` returns the
+    /// canonical kernel path (`/private/tmp/...`) while `record()`
+    /// receives the user-picked path (`/tmp/...`). Without canonical
+    /// comparison every `/tmp`-based mount looks "new" on each
+    /// refresh and loses its app-side metadata.
     func refreshed() -> [MountRecord] {
         let live = TestFSMountScanner.scan()
         var fresh: [String: MountRecord] = [:]
         let now = Date()
         for entry in live {
-            if let existing = byBSD[entry.bsdName], existing.mountpoint == entry.mountpoint {
+            // `existing.mountpoint` is already canonical (record() stores
+            // the canonicalized form), so only the kernel-supplied side
+            // needs a fresh `realpath`.
+            if let existing = byBSD[entry.bsdName],
+                existing.mountpoint == MountTable.canonicalize(entry.mountpoint) {
                 fresh[entry.bsdName] = existing
             } else {
                 fresh[entry.bsdName] = MountRecord(
@@ -71,6 +76,8 @@ actor MountRegistry {
     }
 
     /// App-initiated mount succeeded. Stash the metadata we have.
+    /// Canonicalize the mountpoint so a later `refreshed()` comparison
+    /// against the kernel's canonical path doesn't churn the row.
     func record(
         prep: MountManager.PrepareResult,
         mountpoint: String, sourceJSON: String, volumeName: String?
@@ -79,7 +86,7 @@ actor MountRegistry {
             id: UUID(),
             bsdName: prep.bsdName,
             devNodePath: prep.devNodePath,
-            mountpoint: mountpoint,
+            mountpoint: MountTable.canonicalize(mountpoint),
             sourceJSON: sourceJSON,
             volumeName: volumeName,
             mountedAt: Date()
@@ -145,7 +152,7 @@ enum MountTable {
         }
     }
 
-    private static func canonicalize(_ path: String) -> String {
+    fileprivate static func canonicalize(_ path: String) -> String {
         guard let resolved = realpath(path, nil) else { return path }
         defer { free(resolved) }
         return String(cString: resolved)
