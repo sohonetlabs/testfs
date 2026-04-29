@@ -48,13 +48,14 @@ actor MountManager {
     /// needs. Caller passes a pre-built `MountOptions`; this method
     /// owns only the mount-specific `config` field (= staged tree
     /// path) and sidecar serialization.
-    func prepareMount(treeJSON: Data, options: MountOptions) throws -> PrepareResult {
-        // Pre-flight: surface JSON / TreeBuilder errors before
-        // allocating a dev node. The marker channel covers the same
-        // failures from the extension side, but pre-flight saves
-        // the round-trip and produces the same status text without
-        // mount(8) ever being involved.
-        _ = try TreeBuilder.parseAndBuild(treeJSON: treeJSON, options: options)
+    func prepareMount(treeJSON: Data, options: MountOptions) async throws -> PrepareResult {
+        // Pre-flight runs off-actor so a large fixture's parse / build
+        // doesn't block concurrent unmounts, sweep, or registry
+        // refresh on this actor. parseAndBuild is pure, so a detached
+        // task is safe.
+        try await Task.detached(priority: .userInitiated) {
+            _ = try TreeBuilder.parseAndBuild(treeJSON: treeJSON, options: options)
+        }.value
 
         var imageURL: URL?
         var devNode: String?
