@@ -38,14 +38,9 @@ struct TestFSApp: App {
         // Release it's solid black; in Debug it's solid red so a dev
         // build stands out from a shipped one at a glance.
         applyIconBadge()
-        // Re-register the FSKit extension after a Sparkle update so
-        // extensionkitd's adjudication doesn't go stale. Detached so
-        // the ~hundreds-of-ms shell-out doesn't hold up the first
-        // scene render; mount can't happen until the user clicks the
-        // button anyway, which gives this plenty of time to complete.
-        Task.detached(priority: .userInitiated) {
-            AppEnvironment.reregisterExtensionIfNeeded()
-        }
+        // Kick off post-update extension re-registration. Mount path
+        // awaits the same actor task to avoid racing this kickoff.
+        Task { await ExtensionReregistration.shared.ensureCompleted() }
     }
 
     @Environment(\.openWindow) private var openWindow

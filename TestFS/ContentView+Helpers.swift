@@ -22,8 +22,7 @@ enum AppEnvironment {
     static let icon: Image = Image(nsImage: NSApplication.shared.applicationIconImage)
         .resizable()
 
-    /// Re-register and re-enable the FSKit extension when the running
-    /// build differs from the last one we did this for. Four steps:
+    /// Re-register and re-enable the FSKit extension. Four steps:
     ///
     ///   1. `lsregister -f <app>` — kicks LaunchServices to re-ingest
     ///      the bundle so its database has the post-update version.
@@ -35,19 +34,19 @@ enum AppEnvironment {
     ///      → "user-enabled" (the `+` flag).
     ///
     /// Steps 3 + 4 are the toggle cycle — the same off-then-on flip
-    /// that System Settings → Login Items & Extensions → File System
-    /// Extensions does. The state *transition* is what forces
-    /// `extensionkitd` to drop its cached UUID for the appex and
-    /// re-resolve against the current bundle. Just calling `-e use`
-    /// against an already-`+` extension is a no-op and doesn't kick
-    /// `extensionkitd`, which is why mount kept failing with
-    /// `extensionKit.errorDomain error 2 / File system named testfs
-    /// not found` even after we'd run all the other steps.
+    /// that System Settings does. The state *transition* is what
+    /// forces `extensionkitd` to drop its cached UUID for the appex
+    /// and re-resolve against the current bundle.
+    ///
+    /// Don't gate the "did this work" stamp on shell-command success:
+    /// pluginkit succeeding is not proof that `extensionkitd` resolves
+    /// the new bundle. Only a successful mount is proof. The mount
+    /// path stamps `verifiedMountedVersion` on success; while that
+    /// stamp doesn't match `versionLabel`, this re-runs every launch.
     ///
     /// All four commands run as the user, no admin required.
-    static func reregisterExtensionIfNeeded() {
-        let key = "lastRegisteredVersion"
-        let last = UserDefaults.standard.string(forKey: key) ?? ""
+    static func performReregisterIfNeeded() {
+        let last = UserDefaults.standard.string(forKey: "verifiedMountedVersion") ?? ""
         guard versionLabel != last else { return }
 
         let appBundle = Bundle.main.bundleURL
@@ -59,18 +58,10 @@ enum AppEnvironment {
             + "/Versions/A/Frameworks/LaunchServices.framework"
             + "/Versions/A/Support/lsregister"
         let bundleID = TestFSConstants.extensionBundleID
-        let ok1 = runSilently(lsregister, ["-f", appBundle.path])
-        let ok2 = runSilently("/usr/bin/pluginkit", ["-a", appex.path])
-        let ok3 = runSilently("/usr/bin/pluginkit", ["-e", "ignore", "-i", bundleID])
-        let ok4 = runSilently("/usr/bin/pluginkit", ["-e", "use", "-i", bundleID])
-
-        // Stamp the version only if all four commands succeeded.
-        // A transient failure here means we should retry on next
-        // launch instead of permanently giving up until the next
-        // version bump.
-        if ok1 && ok2 && ok3 && ok4 {
-            UserDefaults.standard.set(versionLabel, forKey: key)
-        }
+        runSilently(lsregister, ["-f", appBundle.path])
+        runSilently("/usr/bin/pluginkit", ["-a", appex.path])
+        runSilently("/usr/bin/pluginkit", ["-e", "ignore", "-i", bundleID])
+        runSilently("/usr/bin/pluginkit", ["-e", "use", "-i", bundleID])
     }
 
     @discardableResult
@@ -87,6 +78,26 @@ enum AppEnvironment {
         } catch {
             return false
         }
+    }
+}
+
+/// One-shot serialization of `performReregisterIfNeeded`. The first
+/// caller spawns the work; later/parallel callers `await` the same
+/// task value. Mount path uses this to ensure post-update toggling
+/// has finished before invoking `mount(8)` — without it the
+/// app-init kickoff and the user's first Mount click race, and
+/// extensionkitd can resolve a stale UUID.
+actor ExtensionReregistration {
+    static let shared = ExtensionReregistration()
+    private var task: Task<Void, Never>?
+
+    func ensureCompleted() async {
+        if task == nil {
+            task = Task.detached(priority: .userInitiated) {
+                AppEnvironment.performReregisterIfNeeded()
+            }
+        }
+        await task?.value
     }
 }
 
