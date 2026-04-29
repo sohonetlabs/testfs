@@ -142,6 +142,25 @@ extension ContentView {
         }
     }
 
+    /// Translate a `MountConfirmResult` into UI status text. Returns
+    /// `true` if the mount succeeded, `false` after writing status
+    /// text describing the failure (caller should `return` early).
+    func handleConfirmResult(_ result: MountManager.MountConfirmResult) -> Bool {
+        switch result {
+        case .mounted:
+            return true
+        case .failed(.some(let reason)):
+            status = "Mount failed: \(reason)"
+            return false
+        case .failed(.none):
+            status =
+                "Mount failed: the kernel accepted the mount but the FSKit "
+                + "extension didn't report a result within 15s. Open Show "
+                + "log… for diagnostics."
+            return false
+        }
+    }
+
     @ViewBuilder
     var extensionDisabledBanner: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {

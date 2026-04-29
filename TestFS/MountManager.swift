@@ -83,6 +83,9 @@ actor MountManager {
             let sidecar = try Self.sidecarEncoder.encode(sidecarOptions)
             try sidecar.write(to: paths.sidecar, options: .atomic)
 
+            // Stage-time clear; see failureMarkerURL doc.
+            try? FileManager.default.removeItem(at: failureMarkerURL(forBSD: bsd))
+
             log.info("prepareMount: \(bsd, privacy: .public)")
             return PrepareResult(devNodePath: dev)
         } catch {
@@ -108,6 +111,7 @@ actor MountManager {
         let paths = sidecarPaths(forBSD: bsdName)
         try? FileManager.default.removeItem(at: paths.tree)
         try? FileManager.default.removeItem(at: paths.sidecar)
+        try? FileManager.default.removeItem(at: failureMarkerURL(forBSD: bsdName))
 
         // Image sweep is best-effort cleanup; pushing it off the
         // user-visible unmount path keeps the UI responsive.
@@ -151,6 +155,24 @@ actor MountManager {
             tree: dir.appendingPathComponent("tree-\(bsd).json"),
             sidecar: dir.appendingPathComponent("active-\(bsd).json")
         )
+    }
+
+    /// Per-BSD failure marker. Parallels
+    /// `MountOptions.failureMarkerURL(forBSDName:)` on the extension
+    /// side — they produce paths to the same physical file via
+    /// different mechanisms, the same way `sidecarPaths` parallels
+    /// `MountOptions.sidecarURL(forBSDName:)`. The host needs the
+    /// hand-built `extensionContainerDir` because `applicationSupportDirectory`
+    /// resolves to the host's own home, not the extension's sandbox.
+    fileprivate func failureMarkerURL(forBSD bsd: String) -> URL {
+        extensionContainerDir().appendingPathComponent("failed-\(bsd).json")
+    }
+
+    /// Read the extension-written failure marker. Returns the error
+    /// reason, or nil if the marker doesn't exist or is malformed.
+    fileprivate static func readFailureMarker(at url: URL) -> String? {
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(LoadFailureMarker.self, from: data).error
     }
 
     // MARK: - hdiutil / mkfile
@@ -225,37 +247,65 @@ actor MountManager {
     /// cheap (sub-microsecond VFS lookup).
     private static let mountConfirmPollInterval: Duration = .milliseconds(100)
 
+    /// Outcome of `confirmMountedOrRollback`. `.failed(reason:)` is
+    /// non-nil when the extension's `loadResource` wrote a failure
+    /// marker; `nil` means we hit the timeout without either a
+    /// statfs success or a marker (genuinely opaque hang).
+    enum MountConfirmResult {
+        case mounted
+        case failed(reason: String?)
+    }
+
     /// Verify the FSKit extension finished bringing up the volume
     /// after `mount(8)` returned. On failure, unmount + detach so
     /// we don't leave a phantom mount or an orphaned dev node.
-    func confirmMountedOrRollback(prep: PrepareResult, mountpoint: String) async -> Bool {
-        if await waitForMount(at: mountpoint) { return true }
-        try? unmount(at: mountpoint)
-        try? detach(bsdName: prep.bsdName)
-        return false
+    /// Returns whatever reason the extension wrote into the failure
+    /// marker (if any), so the caller can surface a useful status.
+    func confirmMountedOrRollback(
+        prep: PrepareResult, mountpoint: String
+    ) async -> MountConfirmResult {
+        let result = await waitForMount(prep: prep, mountpoint: mountpoint)
+        switch result {
+        case .mounted:
+            return .mounted
+        case .failed(let reason):
+            try? unmount(at: mountpoint)
+            try? detach(bsdName: prep.bsdName)
+            return .failed(reason: reason)
+        }
     }
 
-    /// Poll `statfs(2)` until the mountpoint reports `f_fstypename
-    /// == "testfs"`, or the timeout elapses. Uses `ContinuousClock`
-    /// so a sleep/wake mid-poll doesn't skew the deadline. No more
-    /// reliable oracle exists on macOS 26: NSWorkspace mount and
-    /// DiskArbitration "appeared" notifications fire on mount(8)
-    /// accept (before FSKit's loadResource finishes), so they'd
-    /// false-positive a phantom mount. statfs's `f_fstypename`
-    /// flips only once the volume is actually usable.
+    /// Poll for either statfs reporting `f_fstypename == "testfs"`
+    /// (mount loaded) or the extension's per-BSD failure marker
+    /// (loadResource failed). Whichever fires first wins, so
+    /// deterministic failures don't burn the full 15s budget. Uses
+    /// `ContinuousClock` so sleep/wake mid-poll doesn't skew the
+    /// deadline.
+    ///
+    /// statfs is the authoritative success signal — NSWorkspace and
+    /// DiskArbitration notifications fire on `mount(8)` accept,
+    /// before loadResource completes, so they'd false-positive.
+    /// The marker is the authoritative failure signal: extension
+    /// writes it before calling `replyHandler(nil, error)`. Stage-
+    /// time delete in `prepareMount` ensures we never see a stale
+    /// marker from a prior mount that reused this BSD name.
     func waitForMount(
-        at mountpoint: String,
+        prep: PrepareResult, mountpoint: String,
         timeout: Duration = mountConfirmTimeout
-    ) async -> Bool {
+    ) async -> MountConfirmResult {
+        let markerURL = failureMarkerURL(forBSD: prep.bsdName)
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
         while clock.now < deadline {
             if Self.statfsType(at: mountpoint) == TestFSConstants.fstype {
-                return true
+                return .mounted
+            }
+            if let reason = Self.readFailureMarker(at: markerURL) {
+                return .failed(reason: reason)
             }
             try? await Task.sleep(for: Self.mountConfirmPollInterval)
         }
-        return false
+        return .failed(reason: nil)
     }
 
     /// Read `f_fstypename` from `statfs(2)`. Returns `nil` if the

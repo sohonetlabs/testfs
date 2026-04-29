@@ -67,6 +67,20 @@ final class TestFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations {
                 "loadResource: \(nodeCount) nodes from \(configPath, privacy: .public) for \(bsd, privacy: .public)")
             replyHandler(volume, nil)
         } catch {
+            // Drop a per-BSD failure marker so the host's
+            // confirmMountedOrRollback can short-circuit the 15s
+            // timeout. Best-effort: log a write failure but keep the
+            // user-facing replyHandler call; the host then falls back
+            // to the timeout but the diagnostic is in the log.
+            let markerURL = MountOptions.failureMarkerURL(forBSDName: bsd)
+            do {
+                let data = try JSONEncoder().encode(
+                    LoadFailureMarker(error: error.localizedDescription))
+                try data.write(to: markerURL, options: .atomic)
+            } catch {
+                Log.mount.error(
+                    "failed to write failure marker: \(error.localizedDescription, privacy: .public)")
+            }
             Log.mount.error("loadResource failed: \(error.localizedDescription, privacy: .public)")
             replyHandler(nil, error)
         }

@@ -2,21 +2,13 @@
 //  MountOptions.swift
 //  TestFSCore / TestFSExtension
 //
-//  Sidecar config schema decoded by `loadResource` from a known path
-//  (~/Library/Application Support/TestFS/active.json by default). Pure
-//  Swift, compiled into both the SPM TestFSCore target and the Xcode
-//  FSKit extension target.
-//
-//  Defaults match Python `jsonfs.py`'s CLI defaults, not its constructor
-//  defaults — matching what a user running the Python tool would see.
+//  Sidecar schema + path helpers shared by host and extension.
+//  Defaults match Python jsonfs.py's CLI defaults.
 //
 
 import Foundation
 
-/// Identity strings shared by the host app and the extension. Lives
-/// in this file because `MountOptions.swift` is one of the few
-/// sources compiled into both the FSKit extension and the host
-/// app, giving us a single source of truth.
+/// Identity strings shared by host and extension.
 enum TestFSConstants {
     /// `os.Logger` subsystem used by both processes; the host's log
     /// viewer filters on this.
@@ -295,6 +287,13 @@ extension MountOptions: Codable {
     }
 }
 
+/// Shape of the failure-marker JSON the extension writes on
+/// `loadResource` error so the host can decode the underlying
+/// reason instead of polling blind for the full timeout.
+struct LoadFailureMarker: Codable {
+    let error: String
+}
+
 extension MountOptions {
     enum LoadError: Error, LocalizedError {
         case missingConfig
@@ -332,21 +331,22 @@ extension MountOptions {
     /// values, so this is safe to force-unwrap on a loaded instance.
     var blockSizeBytes: Int { parseSize(blockSize)! }
 
-    /// Per-device sidecar path. Each mount writes its own
-    /// `active-<bsdName>.json`, so concurrent mounts on distinct
-    /// /dev/diskN devices can serve different tree JSONs simultaneously.
-    ///
-    /// Lives in the extension's own sandbox Application Support —
-    /// `~/Library/Containers/com.sohonet.testfsmount.appex/Data/Library/
-    /// Application Support/TestFS/`. The extension reads its own
-    /// container without sandbox friction, and any non-sandboxed writer
-    /// (shell scripts, the host app) can write here as the user.
-    ///
-    /// The App Group container is NOT used: FSKit extensions appear to
-    /// get a stricter sandbox profile that denies reads from Group
-    /// Containers even with the `application-groups` entitlement present.
+    /// Per-device sidecar path under the extension's sandbox
+    /// container. Each mount writes its own `active-<bsdName>.json`
+    /// so concurrent mounts on distinct devices serve independent
+    /// tree JSONs. App Group containers are not used — FSKit
+    /// extensions get a stricter sandbox that denies group-container
+    /// reads even with the entitlement.
     static func sidecarURL(forBSDName bsd: String) -> URL {
         extensionContainerTestFSDir().appendingPathComponent("active-\(bsd).json")
+    }
+
+    /// Per-BSD failure marker. Extension writes this on
+    /// `loadResource` error before `replyHandler(nil, error)` so the
+    /// host's `confirmMountedOrRollback` can short-circuit the 15s
+    /// timeout and surface the underlying error.
+    static func failureMarkerURL(forBSDName bsd: String) -> URL {
+        extensionContainerTestFSDir().appendingPathComponent("failed-\(bsd).json")
     }
 
     /// Base directory for sidecar + staged tree JSON files in the
