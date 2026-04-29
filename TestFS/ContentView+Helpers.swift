@@ -59,27 +59,24 @@ enum AppEnvironment {
 
     @discardableResult
     static func performReregisterIfNeeded() -> Bool {
+        // Skip the whole cleanup path when we already verified a
+        // mount on this version. The dump+parse + pkill + four-step
+        // toggle is multi-MB read + several subprocesses; running it
+        // every launch on a stable install is wasted work. The stamp
+        // resets on every release, so post-upgrade always cleans up.
+        let last = UserDefaults.standard.string(forKey: "verifiedMountedVersion") ?? ""
+        guard versionLabel != last else { return true }
+
         // Sweep stale LaunchServices entries before any toggle work.
         // macOS 26's ExtensionKit hard-fails (Cocoa 4099) when the
         // bundle resolver latches onto a stale path that pluginkit
-        // no longer reflects, so accumulated DMG / Trash / dev-build
-        // registrations turn into "extensionKit error 2 / testfs not
-        // found" mount failures even with a clean install. See #68.
-        let sweptCount = sweepStaleRegistrations()
+        // no longer reflects (#68).
+        sweepStaleRegistrations()
         // Kill any orphan TestFSExtension process from before the
         // upgrade. Sparkle's bundle replace doesn't terminate live
-        // ExtensionKit instances, and pluginkit's toggle cycle can
-        // leave the old PID alive holding a stale UUID — extensionkitd
-        // then refuses to start a fresh instance with Cocoa 4099. See #70.
-        let orphansKilled = killOrphanExtensionProcesses()
-        let last = UserDefaults.standard.string(forKey: "verifiedMountedVersion") ?? ""
-        // Toggle when the version changed (post-update), the sweep
-        // removed anything, or we just killed an orphan: extensionkitd
-        // may still have a UUID cached against the just-cleared state,
-        // and only the ignore→use cycle drops that cache.
-        guard versionLabel != last || sweptCount > 0 || orphansKilled > 0 else {
-            return true
-        }
+        // ExtensionKit instances, leaving the old PID alive holding a
+        // stale UUID (#70).
+        _ = killOrphanExtensionProcesses()
 
         let appBundle = Bundle.main.bundleURL
         let appex = appBundle.appendingPathComponent(

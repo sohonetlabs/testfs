@@ -27,19 +27,19 @@ extension AppEnvironment {
         guard result.exit == 0 else { return [] }
         var matches: [String] = []
         var pendingPath: String?
-        for rawLine in result.stdout.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(rawLine)
+        for line in result.stdout.split(separator: "\n", omittingEmptySubsequences: false) {
             if line.hasPrefix("path:") {
-                let trimmed = line.dropFirst("path:".count).trimmingCharacters(in: CharacterSet.whitespaces)
+                let trimmed = line.trimmingPrefix("path:")
+                    .trimmingCharacters(in: .whitespaces)
                 // Strip the trailing `(0xNNNN)` registration ID.
                 if let parenIdx = trimmed.lastIndex(of: "(") {
-                    pendingPath = trimmed[..<parenIdx].trimmingCharacters(in: CharacterSet.whitespaces)
+                    pendingPath = trimmed[..<parenIdx].trimmingCharacters(in: .whitespaces)
                 } else {
                     pendingPath = trimmed
                 }
             } else if line.hasPrefix("identifier:") {
-                let identifier = line.dropFirst("identifier:".count)
-                    .trimmingCharacters(in: CharacterSet.whitespaces)
+                let identifier = line.trimmingPrefix("identifier:")
+                    .trimmingCharacters(in: .whitespaces)
                 if identifier == bundleID, let path = pendingPath {
                     matches.append(path)
                 }
@@ -54,20 +54,14 @@ extension AppEnvironment {
     /// ExtensionKit instances; the pluginkit toggle alone doesn't
     /// always reap them either. extensionkitd then refuses to spawn
     /// a fresh instance for the new bundle and the user gets
-    /// `Cocoa 4099 / NSXPCConnectionInvalid`. SIGTERM to any process
-    /// running the extension binary forces a clean replacement on
-    /// the next mount. Returns 1 if pkill found and signalled at
-    /// least one process, 0 otherwise.
-    @discardableResult
+    /// `Cocoa 4099 / NSXPCConnectionInvalid`. Returns 1 if at least
+    /// one process was signalled, 0 otherwise.
     static func killOrphanExtensionProcesses() -> Int {
         let log = Logger(subsystem: TestFSConstants.logSubsystem, category: "orphan-kill")
         let extensionBinary = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Extensions/TestFSExtension.appex")
             .appendingPathComponent("Contents/MacOS/TestFSExtension")
             .resolvingSymlinksInPath().path
-        // pkill -f matches the substring against the full command line
-        // (including the appex's `-LaunchArguments <base64>` payload).
-        // Exit 0 = at least one process signalled, 1 = no match.
         let result = ShellRunner.run("/usr/bin/pkill", ["-f", extensionBinary])
         if result.exit == 0 {
             log.info("killed orphan TestFSExtension process(es)")
