@@ -187,7 +187,8 @@ final class TestFSVolume: FSVolume {
         switch node.kind {
         case .directory:
             // Unix convention: `.` + parent's `..` + each child subdir's `..`.
-            attrs.linkCount = UInt32(2 + node.directoryChildCount)
+            // Clamp because `linkCount` is UInt32 and the index uses Int.
+            attrs.linkCount = UInt32(clamping: 2 + node.directoryChildCount)
             attrs.type = .directory
             attrs.mode = shape.dirMode
             attrs.size = 0
