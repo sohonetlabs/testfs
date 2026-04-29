@@ -35,7 +35,12 @@ private let sharedVolumeCapabilities: FSVolume.SupportedCapabilities = {
     caps.doesNotSupportVolumeSizes = false
     caps.supportsHiddenFiles = true
     caps.supports64BitObjectIDs = true
-    caps.caseFormat = .insensitiveCasePreserving
+    // Must match `FSfileObjectsAreCaseSensitive=true` in Info.plist and
+    // the byte-keyed `[Data: TreeNodeID]` lookup in TreeIndex. macOS 26
+    // routes name-cache decisions through this runtime capability — a
+    // mismatch with the personality plist produces aliased lookups for
+    // case-distinct siblings (e.g. `Foo.txt` / `foo.txt`).
+    caps.caseFormat = .sensitive
     return caps
 }()
 
