@@ -45,14 +45,12 @@ actor MountManager {
     /// owns only the mount-specific `config` field (= staged tree
     /// path) and sidecar serialization.
     func prepareMount(treeJSON: Data, options: MountOptions) throws -> PrepareResult {
-        // NB: pre-flight `TreeBuilder.parseAndBuild` was removed —
-        // TestFSExtension's pure-Swift parsers aren't members of the
-        // host target, so the call doesn't compile from a clean
-        // build (PR #52 only worked through cached derived data).
-        // The marker channel (PR #53) catches the same failures via
-        // the extension's loadResource, so user-visible behavior is
-        // preserved. Re-add pre-flight once the parsers are added to
-        // the host's target membership in project.pbxproj.
+        // Pre-flight: surface JSON / TreeBuilder errors before
+        // allocating a dev node. The marker channel covers the same
+        // failures from the extension side, but pre-flight saves
+        // the round-trip and produces the same status text without
+        // mount(8) ever being involved.
+        _ = try TreeBuilder.parseAndBuild(treeJSON: treeJSON, options: options)
 
         var imageURL: URL?
         var devNode: String?

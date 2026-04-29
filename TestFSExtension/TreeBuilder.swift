@@ -5,7 +5,12 @@
 //  Builds a TreeIndex from a parsed JSONTree node, assigning monotonic
 //  IDs, applying Unicode normalization from MountOptions, preserving
 //  insertion order for enumeration cookies, and failing loudly on
-//  case-insensitive name collisions. Pure Swift, no FSKit.
+//  case-insensitive name collisions.
+//
+//  Pure Swift — do NOT add `import FSKit` here. This file is
+//  dual-membership (TestFS host + TestFSExtension); FSKit isn't
+//  linked into the host target and an import would silently break
+//  the host build only on a clean pbxproj rebuild.
 //
 
 import Foundation
