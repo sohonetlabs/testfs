@@ -307,6 +307,7 @@ extension MountOptions {
         case invalidPreGeneratedBlocks(Int)
         case invalidRateLimit(Double)
         case invalidIopLimit(Int)
+        case invalidMtime(String)
         case malformed(underlying: Error)
 
         var errorDescription: String? {
@@ -323,6 +324,8 @@ extension MountOptions {
                 return "rate_limit must be >= 0, got \(value)"
             case .invalidIopLimit(let value):
                 return "iop_limit must be >= 0, got \(value)"
+            case .invalidMtime(let value):
+                return "mtime must be 'YYYY-MM-DD' or full ISO 8601, got '\(value)'"
             case .malformed(let err):
                 return "malformed sidecar JSON: \(err.localizedDescription)"
             }
