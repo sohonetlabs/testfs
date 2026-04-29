@@ -82,7 +82,18 @@ fi
 # node, so mount -F under sudo would fail. osascript surfaces the
 # admin prompt as a GUI dialog so this works non-interactively from
 # outside a tty.
-osascript -e "do shell script \"chown $USER $DEV\" with administrator privileges" >/dev/null
+#
+# `$DEV` is read inside AppleScript via `system attribute`, then
+# `quoted form of` re-quotes it for the inner shell — keeps untrusted
+# bytes out of the AppleScript source text so they can't break into
+# `do shell script ... with administrator privileges`. Username comes
+# from `system info` (kernel credential) rather than the env, so a
+# tampered `USER` can't be a privesc primitive either.
+TESTFS_DEV="$DEV" osascript <<'APPLESCRIPT' >/dev/null
+set u to short user name of (system info)
+set dev to system attribute "TESTFS_DEV"
+do shell script "/usr/sbin/chown " & quoted form of u & " " & quoted form of dev with administrator privileges
+APPLESCRIPT
 
 BSD="${DEV#/dev/}"
 echo "Allocated $DEV (image $IMG, bsdName=$BSD)"
