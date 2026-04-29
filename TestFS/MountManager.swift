@@ -208,14 +208,15 @@ actor MountManager {
         }
     }
 
-    /// 3-second ceiling covers cold-start of the extension; on a
-    /// warm system loadResource typically completes in tens of ms,
-    /// so a successful mount returns on the first or second poll.
-    private static let mountConfirmTimeout: TimeInterval = 3.0
+    /// 15-second ceiling. Warm-system loadResource completes in tens
+    /// of ms; cold-start (post-Sparkle, post-reboot, post-TCC-prompt)
+    /// can run several seconds. Set the budget high enough that we
+    /// don't false-roll-back a mount that would have come up.
+    private static let mountConfirmTimeout: Duration = .seconds(15)
     /// 100 ms is short enough that the success path adds barely-
     /// noticeable latency, and a single statfs syscall per tick is
     /// cheap (sub-microsecond VFS lookup).
-    private static let mountConfirmPollInterval: TimeInterval = 0.1
+    private static let mountConfirmPollInterval: Duration = .milliseconds(100)
 
     /// Verify the FSKit extension finished bringing up the volume
     /// after `mount(8)` returned. On failure, unmount + detach so
@@ -228,17 +229,24 @@ actor MountManager {
     }
 
     /// Poll `statfs(2)` until the mountpoint reports `f_fstypename
-    /// == "testfs"`, or the timeout elapses.
+    /// == "testfs"`, or the timeout elapses. Uses `ContinuousClock`
+    /// so a sleep/wake mid-poll doesn't skew the deadline. No more
+    /// reliable oracle exists on macOS 26: NSWorkspace mount and
+    /// DiskArbitration "appeared" notifications fire on mount(8)
+    /// accept (before FSKit's loadResource finishes), so they'd
+    /// false-positive a phantom mount. statfs's `f_fstypename`
+    /// flips only once the volume is actually usable.
     func waitForMount(
         at mountpoint: String,
-        timeout: TimeInterval = mountConfirmTimeout
+        timeout: Duration = mountConfirmTimeout
     ) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
             if Self.statfsType(at: mountpoint) == TestFSConstants.fstype {
                 return true
             }
-            try? await Task.sleep(for: .seconds(Self.mountConfirmPollInterval))
+            try? await Task.sleep(for: Self.mountConfirmPollInterval)
         }
         return false
     }
