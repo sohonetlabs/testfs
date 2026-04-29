@@ -40,16 +40,18 @@ actor MountRegistry {
         Array(byBSD.values).sorted(by: { $0.mountedAt < $1.mountedAt })
     }
 
-    /// Ground-truth from the kernel. Adds entries we didn't know
-    /// about; preserves source/volume metadata on entries we already
-    /// had; drops entries no longer mounted. Returns the post-
-    /// reconciliation snapshot so callers don't need a separate hop.
+    /// Ground-truth from the kernel. Preserves source/volume metadata
+    /// only when both the BSD name AND the mountpoint match — `diskN`
+    /// values are recyclable, so the kernel can hand the same name
+    /// back out to a different mount. If the mountpoint flipped,
+    /// treat the row as new (the old `sourceJSON`/`volumeName` aren't
+    /// transferable to a different mount).
     func refreshed() -> [MountRecord] {
         let live = TestFSMountScanner.scan()
         var fresh: [String: MountRecord] = [:]
         let now = Date()
         for entry in live {
-            if let existing = byBSD[entry.bsdName] {
+            if let existing = byBSD[entry.bsdName], existing.mountpoint == entry.mountpoint {
                 fresh[entry.bsdName] = existing
             } else {
                 fresh[entry.bsdName] = MountRecord(
