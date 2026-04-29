@@ -159,11 +159,14 @@ enum TreeBuilder {
             }
         }
 
+        let subdirCount = childIDs.reduce(0) { count, childID in
+            count + (ctx.nodesByID[childID]?.kind == .directory ? 1 : 0)
+        }
         ctx.nodesByID[id] = TreeIndex.Node(
             id: id, parentID: parentID, name: name,
             kind: .directory, size: 0,
             childrenIDs: childIDs, childrenByName: byName,
-            directoryChildCount: 0
+            directoryChildCount: subdirCount
         )
         return (id, name)
     }

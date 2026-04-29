@@ -186,8 +186,8 @@ final class TestFSVolume: FSVolume {
         attrs.gid = shape.gid
         switch node.kind {
         case .directory:
-            // Unix convention: `.` plus each child subdir's `..` = 2 min.
-            attrs.linkCount = 2
+            // Unix convention: `.` + parent's `..` + each child subdir's `..`.
+            attrs.linkCount = UInt32(2 + node.directoryChildCount)
             attrs.type = .directory
             attrs.mode = shape.dirMode
             attrs.size = 0
