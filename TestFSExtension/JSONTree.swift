@@ -70,6 +70,7 @@ enum JSONTree {
     enum LoadError: Error, LocalizedError {
         case emptyArray
         case firstEntryNotDirectory(foundType: String)
+        case unexpectedTrailingEntry(foundType: String)
         case malformed(underlying: Error)
 
         var errorDescription: String? {
@@ -78,6 +79,8 @@ enum JSONTree {
                 return "tree -J -s output must be a non-empty JSON array"
             case .firstEntryNotDirectory(let foundType):
                 return "first array entry must be a directory, got '\(foundType)'"
+            case .unexpectedTrailingEntry(let foundType):
+                return "only 'report' entries may follow the leading directory, got '\(foundType)'"
             case .malformed(let err):
                 // DecodingError's default description is a structured dump that
                 // buries the useful bit (debugDescription in Context). Pull it

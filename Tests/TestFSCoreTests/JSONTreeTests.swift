@@ -74,6 +74,45 @@ final class JSONTreeTests: XCTestCase {
         XCTAssertThrowsError(try JSONTree.load(from: data))
     }
 
+    // Anything after the leading directory must be a tree-emitted
+    // `report` summary; a second directory or file at the top level
+    // would otherwise be silently dropped.
+    func testRejectsTrailingDirectory() {
+        let data = Data(
+            """
+            [
+              {"type":"directory","name":"first","contents":[]},
+              {"type":"directory","name":"second","contents":[]}
+            ]
+            """.utf8)
+        XCTAssertThrowsError(try JSONTree.load(from: data)) { error in
+            guard let err = error as? JSONTree.LoadError,
+                case .unexpectedTrailingEntry(let type) = err
+            else {
+                return XCTFail("expected .unexpectedTrailingEntry, got \(error)")
+            }
+            XCTAssertEqual(type, "directory")
+        }
+    }
+
+    func testRejectsTrailingFile() {
+        let data = Data(
+            """
+            [
+              {"type":"directory","name":"r","contents":[]},
+              {"type":"file","name":"stray.txt","size":1}
+            ]
+            """.utf8)
+        XCTAssertThrowsError(try JSONTree.load(from: data)) { error in
+            guard let err = error as? JSONTree.LoadError,
+                case .unexpectedTrailingEntry(let type) = err
+            else {
+                return XCTFail("expected .unexpectedTrailingEntry, got \(error)")
+            }
+            XCTAssertEqual(type, "file")
+        }
+    }
+
     // MARK: - optional/default fields
 
     func testAllowsMissingContents() throws {
