@@ -33,6 +33,16 @@ enclosure.attributes["type"] = "application/octet-stream"
 
 item.add_element("sparkle:minimumSystemVersion").text = "15.4"
 
+# Re-notarize/re-sign produces a new edSignature for the same
+# version; drop any stale entry to avoid ambiguous duplicates.
+# Materialize via to_a first — REXML's `elements.each` walks an
+# internal array by index, so mutating during iteration skips the
+# entry after each delete.
+channel.elements.to_a("item").each do |existing|
+  short = existing.elements["sparkle:shortVersionString"]
+  channel.delete_element(existing) if short && short.text == version
+end
+
 first_item = channel.elements["item"]
 first_item ? channel.insert_before(first_item, item) : channel.add_element(item)
 
