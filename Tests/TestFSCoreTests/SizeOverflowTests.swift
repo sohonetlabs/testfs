@@ -1,11 +1,10 @@
 //
 //  SizeOverflowTests.swift
 //
-//  TestFS volume statistics report `(totalFileBytes + 4095) / 4096`
-//  blocks (see `TestFSVolume.volumeStatistics`); the addition overflows
-//  once `totalFileBytes` passes `UInt64.max - 4095`. TreeBuilder
-//  rejects oversized inputs at build time so the volume layer can
-//  rely on the math.
+//  TestFSVolume.volumeStatistics computes block counts in a way that
+//  overflows for sufficiently large totalFileBytes. TreeBuilder rejects
+//  oversized inputs at build time so the volume layer can rely on the
+//  math; the cap is `TreeBuilder.maxTotalFileBytes`.
 //
 
 import XCTest
