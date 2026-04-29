@@ -52,12 +52,18 @@ mkdir -p "$CONTAINER_DIR"
 TREE="$CONTAINER_DIR/tree-$BSD.json"
 SIDECAR="$CONTAINER_DIR/active-$BSD.json"
 cp "$CONFIG_ABS" "$TREE"
-cat > "$SIDECAR" <<EOF
-{
-  "config": "$TREE",
-  "volume_name": "$(basename "$CONFIG_ABS" .json)"
-}
-EOF
+# Encode via python3: bash has no JSON encoder, and a path or volume
+# name with `"`, `\`, or newline would break a heredoc. The python
+# body is static — pass any new sidecar field via env vars too,
+# never inline shell-interpolated.
+TREE_PATH="$TREE" VOLUME_NAME="$(basename "$CONFIG_ABS" .json)" \
+    /usr/bin/python3 -c '
+import json, os, sys
+sys.stdout.write(json.dumps({
+    "config": os.environ["TREE_PATH"],
+    "volume_name": os.environ["VOLUME_NAME"],
+}))
+' > "$SIDECAR"
 echo "Staged $TREE (from $CONFIG_ABS)"
 echo "Wrote   $SIDECAR"
 
