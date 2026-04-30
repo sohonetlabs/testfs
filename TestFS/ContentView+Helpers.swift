@@ -131,6 +131,33 @@ enum AppEnvironment {
         .appendingPathComponent(
             "Library/Group Containers/group.com.apple.fskit.settings/enabledModules.plist")
 
+    /// User-facing copy for the post-install reboot requirement.
+    /// Shared by the in-app banner, the Mount-click pre-flight, and
+    /// the post-`mount(8)` failure text so the wording stays in sync.
+    static let rebootRequiredMessage =
+        "TestFS was installed or updated since the last restart. On "
+        + "macOS 26 the first mount fails until you restart your Mac."
+
+    /// True iff the running app bundle was installed (mtime) AFTER the
+    /// system last booted. macOS 26's `fskit_agent` (per-user FSKit
+    /// broker) caches XPC connections to extension PIDs and doesn't
+    /// flush the cache when an extension exits. After a Sparkle update
+    /// replaces the bundle, the first mount fails with
+    /// `extensionKit.errorDomain error 2` until `fskit_agent` is
+    /// reaped — empirically only a reboot reliably clears it (toggling
+    /// off+on in System Settings rewrites the plist but doesn't flush
+    /// the in-memory XPC cache). The host shows a "Restart required"
+    /// banner whenever this is true. `static let` so the stat()
+    /// syscall fires exactly once per process; both inputs (bundle
+    /// mtime, boot time) are stable for the process lifetime.
+    static let needsRebootAfterUpdate: Bool = {
+        let bootTime = Date().addingTimeInterval(-ProcessInfo.processInfo.systemUptime)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: appBundleURL.path),
+            let installed = attrs[.modificationDate] as? Date
+        else { return false }
+        return installed > bootTime
+    }()
+
     /// True iff fskitd's enabledModules.plist lists our extension's
     /// bundle ID. False when the file is missing, unparseable, or
     /// the bundle ID isn't in the array. This is the authoritative
@@ -193,6 +220,24 @@ extension ContentView {
         }
     }
 
+    /// Pre-flight check before invoking mount(8). Returns a status
+    /// message when the mount can't succeed (extension not enabled,
+    /// or the system needs a reboot after a Sparkle update); nil
+    /// when it's safe to proceed. Caller writes the message to
+    /// `status` and returns early.
+    func mountPreflightFailure() -> String? {
+        if !fskitWatcher.isEnabled {
+            return
+                "TestFS extension isn't enabled. Toggle it on under "
+                + "System Settings → General → Login Items & Extensions "
+                + "→ File System Extensions, then try again."
+        }
+        if needsReboot {
+            return AppEnvironment.rebootRequiredMessage
+        }
+        return nil
+    }
+
     /// Translate a `MountConfirmResult` into UI status text. Returns
     /// `true` if the mount succeeded, `false` after writing status
     /// text describing the failure (caller should `return` early).
@@ -237,6 +282,29 @@ extension ContentView {
         )
     }
 
+    @ViewBuilder
+    var rebootRequiredBanner: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "arrow.clockwise.circle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Restart required")
+                    .font(.callout).bold()
+                Text(
+                    AppEnvironment.rebootRequiredMessage
+                    + " This banner clears automatically after reboot.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.orange.opacity(0.10))
+        )
+    }
+
     /// Translate a raw `mount(8)` failure into something an end-user can
     /// act on. Two failure classes need explicit guidance:
     ///
@@ -260,10 +328,11 @@ extension ContentView {
             return """
                 Mount failed: \(raw)
 
-                macOS couldn't reach the FSKit extension. Toggle TestFS \
-                off and back on under System Settings → General → Login \
-                Items & Extensions → File System Extensions to force \
-                re-adjudication, then try mounting again.
+                \(AppEnvironment.rebootRequiredMessage) If it still \
+                fails after a reboot, toggle TestFS off and back on \
+                under System Settings → General → Login Items & \
+                Extensions → File System Extensions to force \
+                re-adjudication.
                 """
         }
         if raw.contains("Operation not permitted") || raw.contains("exit 69") {

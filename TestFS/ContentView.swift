@@ -27,7 +27,9 @@ struct ContentView: View {
     /// System Settings → Login Items & Extensions → File System
     /// Extensions, so the banner can disappear and the Mount button
     /// re-enable without the user clicking anything in our app.
-    @StateObject private var fskitWatcher = FSKitEnabledWatcher()
+    @StateObject var fskitWatcher = FSKitEnabledWatcher()
+
+    let needsReboot = AppEnvironment.needsRebootAfterUpdate
 
     /// Remembered values for the Rate limit / IOP limit toggles, so
     /// flipping the toggle off → on restores whatever the user last
@@ -98,6 +100,8 @@ struct ContentView: View {
     private var mountSection: some View {
         if !fskitWatcher.isEnabled {
             extensionDisabledBanner
+        } else if needsReboot {
+            rebootRequiredBanner
         }
         Text("Mount").font(.headline)
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 6) {
@@ -197,11 +201,8 @@ struct ContentView: View {
         // has refreshed after a toggle), short-circuit with the same
         // guidance the banner gives instead of letting mount(8) fail
         // with the cryptic "Module is disabled" / Cocoa 4099 chain.
-        guard fskitWatcher.isEnabled else {
-            status =
-                "TestFS extension isn't enabled. Toggle it on under "
-                + "System Settings → General → Login Items & Extensions "
-                + "→ File System Extensions, then try again."
+        if let preflightFailure = mountPreflightFailure() {
+            status = preflightFailure
             return
         }
         guard !recordIfAlreadyMounted(at: mnt.path) else { return }
