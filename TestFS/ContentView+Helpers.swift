@@ -66,6 +66,14 @@ enum AppEnvironment {
             "Contents/Extensions/TestFSExtension.appex")
         guard FileManager.default.fileExists(atPath: appex.path) else { return false }
 
+        // Sparkle's bundle replace doesn't terminate the live appex;
+        // extensionkitd then routes mount requests to the pre-update
+        // PID, whose cdhash no longer matches the new bundle, and
+        // mount(8) fails with `extensionKit.errorDomain error 2`.
+        // Reaping the orphan forces extensionkitd to spawn a fresh
+        // instance from the updated bundle on the next mount.
+        killOrphanExtensionProcesses(appex: appex)
+
         let lsregister = "/System/Library/Frameworks/CoreServices.framework"
             + "/Versions/A/Frameworks/LaunchServices.framework"
             + "/Versions/A/Support/lsregister"
@@ -78,6 +86,22 @@ enum AppEnvironment {
         let ok4 = ShellRunner.run("/usr/bin/pluginkit",
             ["-e", "use", "-i", bundleID], timeout: timeout).exit == 0
         return ok1 && ok2 && ok3 && ok4
+    }
+
+    /// `pkill -f` against the appex binary path so any TestFSExtension
+    /// process from a previous bundle gets reaped. Empirically validated
+    /// on macOS 26.4.1 (vortex.local): a Sparkle update from 0.1.24 →
+    /// 0.1.25 left PID 3490 of the old extension alive for 1h17min;
+    /// mount(8) failed with `extensionKit.errorDomain error 2` until
+    /// the orphan was killed manually. Pre-flight enabledModules.plist
+    /// passed throughout — this is a separate failure mode from "not
+    /// enabled", and only manifests post-Sparkle-update, so it's
+    /// gated behind the same version-stamp check as the toggle cycle.
+    private static func killOrphanExtensionProcesses(appex: URL) {
+        let binary = appex
+            .appendingPathComponent("Contents/MacOS/TestFSExtension")
+            .resolvingSymlinksInPath().path
+        _ = ShellRunner.run("/usr/bin/pkill", ["-f", binary], timeout: subprocessTimeout)
     }
 
     /// Path of fskitd's per-user enabled-modules plist. System Settings
@@ -199,14 +223,37 @@ extension ContentView {
         )
     }
 
-    /// Translate a raw `mount(8)` failure into something an end-user
-    /// can act on. The "extension not enabled" class is filtered out
-    /// upstream by the FSKitEnabledWatcher pre-flight, so the only
-    /// guidance left for `Operation not permitted` is the TCC /
-    /// privacy-protected-mountpoint case. Other errors surface the
-    /// raw mount(8) text verbatim and let the in-app log viewer
-    /// expose the full stdout/stderr captured by MountManager.
+    /// Translate a raw `mount(8)` failure into something an end-user can
+    /// act on. Two failure classes need explicit guidance:
+    ///
+    /// - `extensionKit.errorDomain error 2` / "File system named testfs
+    ///   not found" — extensionkitd can't reach the appex. The pre-flight
+    ///   has already ruled out "not enabled in System Settings", so this
+    ///   is the orphan-extension flake (a stale appex PID surviving a
+    ///   Sparkle update). `performReregisterIfNeeded` kills orphans on
+    ///   the post-update path; if the user still hits this it means the
+    ///   kill didn't reach (e.g., parent process owned by another user)
+    ///   and the user-side fix is the System Settings toggle off+on.
+    ///
+    /// - `Operation not permitted` / `exit 69` — TCC denying mount(8)
+    ///   on a privacy-protected directory.
+    ///
+    /// Anything else: surface the raw text verbatim. MountManager logs
+    /// full stdout/stderr to OSLog for the in-app log viewer.
     static func friendlyMountError(_ raw: String) -> String {
+        if raw.contains("extensionKit.errorDomain")
+            || raw.contains("File system named testfs not found") {
+            return """
+                Mount failed: \(raw)
+
+                macOS couldn't reach the FSKit extension. Toggle TestFS \
+                off and back on under System Settings → General → Login \
+                Items & Extensions → File System Extensions to force \
+                re-adjudication, then try mounting again. App updates \
+                can leave the previous extension instance alive; toggling \
+                off+on tears it down.
+                """
+        }
         if raw.contains("Operation not permitted") || raw.contains("exit 69") {
             return """
                 Mount failed: \(raw)
