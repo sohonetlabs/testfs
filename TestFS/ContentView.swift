@@ -112,6 +112,7 @@ struct ContentView: View {
                     .lineLimit(1).truncationMode(.middle)
                 Button("Choose…") { Task { await pickJSON() } }
                     .disabled(busy)
+                examplesMenu
             }
             GridRow {
                 Text("Mount at").foregroundStyle(.secondary)

@@ -2,9 +2,9 @@
 //  ContentView+Helpers.swift
 //  TestFS
 //
-//  Cached statics and small helpers for ContentView. Split out so
-//  the main ContentView.swift stays inside SwiftLint's
-//  type-body-length budget.
+//  AppEnvironment statics, the post-update re-registration actor,
+//  and ContentView's non-view helpers (mount preflight, options
+//  validation, mount-failure formatter).
 //
 
 import AppKit
@@ -158,6 +158,13 @@ enum AppEnvironment {
         return installed > bootTime
     }()
 
+    /// `[URL]` of every `*.json` file shipped under
+    /// `TestFS.app/Contents/Resources/Examples/`. Enumerated once per
+    /// process from the bundle. Empty during SwiftUI Previews where
+    /// the running bundle isn't the production app.
+    static let bundledExampleURLs: [URL] = BundledExamples.sortedJSONURLs(
+        in: Bundle.main.url(forResource: "Examples", withExtension: nil))
+
     /// True iff fskitd's enabledModules.plist lists our extension's
     /// bundle ID. False when the file is missing, unparseable, or
     /// the bundle ID isn't in the array. This is the authoritative
@@ -257,54 +264,6 @@ extension ContentView {
         }
     }
 
-    @ViewBuilder
-    var extensionDisabledBanner: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .foregroundStyle(.blue)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Enable the FSKit extension")
-                    .font(.callout).bold()
-                Text(
-                    "Toggle TestFS on under General → Login Items & Extensions "
-                    + "→ File System Extensions. This banner disappears "
-                    + "automatically the moment the toggle takes effect.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Open System Settings…") { openExtensionSettings() }
-        }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.blue.opacity(0.10))
-        )
-    }
-
-    @ViewBuilder
-    var rebootRequiredBanner: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "arrow.clockwise.circle.fill")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Restart required")
-                    .font(.callout).bold()
-                Text(
-                    AppEnvironment.rebootRequiredMessage
-                    + " This banner clears automatically after reboot.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.orange.opacity(0.10))
-        )
-    }
-
     /// Translate a raw `mount(8)` failure into something an end-user can
     /// act on. Two failure classes need explicit guidance:
     ///
@@ -345,52 +304,5 @@ extension ContentView {
                 """
         }
         return "mount failed: \(raw)"
-    }
-
-    func pickJSON() async {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.title = "Choose tree JSON"
-        if panel.runModal() == .OK { pickedJSON = panel.url }
-    }
-
-    func pickMountpoint() async {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.title = "Choose mountpoint (must be empty)"
-        if panel.runModal() == .OK { pickedMountpoint = panel.url }
-    }
-
-    /// `NSOpenPanel` rooted at the bundled examples folder. Used by
-    /// the **File ▸ Try an example…** menu item.
-    func pickBundledExample() async {
-        guard let examples = Bundle.main.url(
-            forResource: "Examples", withExtension: nil
-        ) else {
-            return
-        }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.directoryURL = examples
-        panel.title = "Try an example"
-        if panel.runModal() == .OK { pickedJSON = panel.url }
-    }
-
-    /// Open System Settings → Login Items & Extensions →
-    /// File System Extensions so the user can flip the extension
-    /// toggle on.
-    func openExtensionSettings() {
-        let url = URL(string:
-            "x-apple.systempreferences:com.apple.LoginItems-Settings.extension?Extensions")!
-        NSWorkspace.shared.open(url)
     }
 }

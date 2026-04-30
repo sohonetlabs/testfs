@@ -24,12 +24,14 @@ This is the macOS-native port of
    to enable the FSKit extension — click **Open System Settings…**, then
    toggle **TestFS** on under *General → Login Items & Extensions →
    File System Extensions*.
-4. Pick a JSON tree (the **File ▸ Try an example…** menu opens an
-   embedded set), pick an empty directory as the mountpoint, click
-   **Mount**. **Avoid Desktop / Documents / Downloads / iCloud
-   Drive / Pictures / Movies / Music** — macOS won't let `fskitd`
-   write to those, and the mount will fail with *Operation not
-   permitted*. A subdir under your home folder root or `/tmp` works.
+4. Pick a JSON tree (the **Examples ▾** button next to **Choose…**
+   opens the bundled set; **File ▸ Try an example…** does the same
+   thing through a file dialog), pick an empty directory as the
+   mountpoint, click **Mount**. **Avoid Desktop / Documents /
+   Downloads / iCloud Drive / Pictures / Movies / Music** — macOS
+   won't let `fskitd` write to those, and the mount will fail with
+   *Operation not permitted*. A subdir under your home folder root
+   or `/tmp` works.
 
 The DMG is signed with a Developer ID Application certificate and
 notarized by Apple, so Gatekeeper accepts it without warnings.

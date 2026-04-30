@@ -38,13 +38,14 @@ let package = Package(
                 "TestFSExtension/TestFileSystem.swift"
             ],
             sources: [
+                "TestFSExtension/BlockCache.swift",
+                "TestFSExtension/BundledExamples.swift",
                 "TestFSExtension/JSONTree.swift",
                 "TestFSExtension/LoadFailureMarker.swift",
                 "TestFSExtension/MountOptions.swift",
-                "TestFSExtension/TreeIndex.swift",
+                "TestFSExtension/Throttle.swift",
                 "TestFSExtension/TreeBuilder.swift",
-                "TestFSExtension/BlockCache.swift",
-                "TestFSExtension/Throttle.swift"
+                "TestFSExtension/TreeIndex.swift"
             ]
         ),
         .testTarget(

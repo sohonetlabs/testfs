@@ -12,6 +12,7 @@
 		A1B2C3D40000000000000002 /* JSONTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000102 /* JSONTree.swift */; };
 		A1B2C3D40000000000000003 /* TreeIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000103 /* TreeIndex.swift */; };
 		A1B2C3D40000000000000004 /* LoadFailureMarker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000104 /* LoadFailureMarker.swift */; };
+		A1B2C3D40000000000000005 /* BundledExamples.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D40000000000000105 /* BundledExamples.swift */; };
 		CC3283482D99D02200EFFA01 /* TestFSExtension.appex in Embed ExtensionKit Extensions */ = {isa = PBXBuildFile; fileRef = CC32833E2D99D02200EFFA01 /* TestFSExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		D6C092B22D1D8FACF1FCEF9E /* MountOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80534BA6D187E9CFE30D1A03 /* MountOptions.swift */; };
 /* End PBXBuildFile section */
@@ -47,6 +48,7 @@
 		A1B2C3D40000000000000102 /* JSONTree.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = JSONTree.swift; path = TestFSExtension/JSONTree.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000103 /* TreeIndex.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TreeIndex.swift; path = TestFSExtension/TreeIndex.swift; sourceTree = "<group>"; };
 		A1B2C3D40000000000000104 /* LoadFailureMarker.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = LoadFailureMarker.swift; path = TestFSExtension/LoadFailureMarker.swift; sourceTree = "<group>"; };
+		A1B2C3D40000000000000105 /* BundledExamples.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = BundledExamples.swift; path = TestFSExtension/BundledExamples.swift; sourceTree = "<group>"; };
 		CC32833E2D99D02200EFFA01 /* TestFSExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.extensionkit-extension"; includeInIndex = 0; path = TestFSExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CCF967EC2C1C110D00FBE72D /* TestFS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TestFS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -303,6 +305,7 @@
 				A1B2C3D40000000000000002 /* JSONTree.swift in Sources */,
 				A1B2C3D40000000000000003 /* TreeIndex.swift in Sources */,
 				A1B2C3D40000000000000004 /* LoadFailureMarker.swift in Sources */,
+				A1B2C3D40000000000000005 /* BundledExamples.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
