@@ -58,6 +58,32 @@ final class AllFixturesTests: XCTestCase {
             note: "tar: many files in one directory")
     ]
 
+    // MARK: - dynamic enumeration
+
+    /// Parse every `*.json` shipped in the Fixtures directory and assert
+    /// the root is a directory. The named-fixture invariants below add
+    /// stricter assertions for the ones we care about specifically; this
+    /// test catches the case where a new bundled example file is added
+    /// to `Examples/` (and copied into `Fixtures/`) but isn't in a
+    /// `tree -J -s`-shaped form.
+    func testEveryBundledFixtureParses() throws {
+        let urls = Bundle.module.urls(
+            forResourcesWithExtension: "json", subdirectory: "Fixtures") ?? []
+        XCTAssertFalse(urls.isEmpty, "no fixtures found in test bundle")
+        for url in urls {
+            let data = try Data(contentsOf: url)
+            do {
+                let root = try JSONTree.load(from: data)
+                guard case .directory = root else {
+                    XCTFail("\(url.lastPathComponent) root was not a directory")
+                    continue
+                }
+            } catch {
+                XCTFail("\(url.lastPathComponent) failed to parse: \(error)")
+            }
+        }
+    }
+
     // MARK: - small fixtures
 
     func testEverySmallFixtureParses() throws {
