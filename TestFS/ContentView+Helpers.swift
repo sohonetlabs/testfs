@@ -56,31 +56,38 @@ enum AppEnvironment {
     /// directly via `@AppStorage` from ContentView.
     static let verifiedMountedVersionKey = "verifiedMountedVersion"
 
+    /// URL of the running host bundle. Captured once so the lsregister
+    /// argument and the appex sub-path read from the same anchor.
+    static let appBundleURL: URL = Bundle.main.bundleURL
+
+    /// URL of the embedded TestFSExtension appex. Stable for the
+    /// process lifetime; shared by the lsregister/pluginkit toggle
+    /// path and the orphan-extension reaper.
+    static let appexURL: URL = appBundleURL
+        .appendingPathComponent("Contents/Extensions/TestFSExtension.appex")
+
+    /// Resolved path of the appex's main executable, for exact-path
+    /// equality against `proc_pidpath` output.
+    static let appexBinaryPath: String = appexURL
+        .appendingPathComponent("Contents/MacOS/TestFSExtension")
+        .resolvingSymlinksInPath().path
+
     @discardableResult
     static func performReregisterIfNeeded() -> Bool {
         let last = UserDefaults.standard.string(forKey: verifiedMountedVersionKey) ?? ""
         guard versionLabel != last else { return true }
 
-        let appBundle = Bundle.main.bundleURL
-        let appex = appBundle.appendingPathComponent(
-            "Contents/Extensions/TestFSExtension.appex")
-        guard FileManager.default.fileExists(atPath: appex.path) else { return false }
+        guard FileManager.default.fileExists(atPath: appexURL.path) else { return false }
 
-        // Sparkle's bundle replace doesn't terminate the live appex;
-        // extensionkitd then routes mount requests to the pre-update
-        // PID, whose cdhash no longer matches the new bundle, and
-        // mount(8) fails with `extensionKit.errorDomain error 2`.
-        // Reaping the orphan forces extensionkitd to spawn a fresh
-        // instance from the updated bundle on the next mount.
-        killOrphanExtensionProcesses(appex: appex)
+        killOrphanExtensionProcesses()
 
         let lsregister = "/System/Library/Frameworks/CoreServices.framework"
             + "/Versions/A/Frameworks/LaunchServices.framework"
             + "/Versions/A/Support/lsregister"
         let bundleID = TestFSConstants.extensionBundleID
         let timeout = subprocessTimeout
-        let ok1 = ShellRunner.run(lsregister, ["-f", appBundle.path], timeout: timeout).exit == 0
-        let ok2 = ShellRunner.run("/usr/bin/pluginkit", ["-a", appex.path], timeout: timeout).exit == 0
+        let ok1 = ShellRunner.run(lsregister, ["-f", appBundleURL.path], timeout: timeout).exit == 0
+        let ok2 = ShellRunner.run("/usr/bin/pluginkit", ["-a", appexURL.path], timeout: timeout).exit == 0
         let ok3 = ShellRunner.run("/usr/bin/pluginkit",
             ["-e", "ignore", "-i", bundleID], timeout: timeout).exit == 0
         let ok4 = ShellRunner.run("/usr/bin/pluginkit",
@@ -88,20 +95,27 @@ enum AppEnvironment {
         return ok1 && ok2 && ok3 && ok4
     }
 
-    /// `pkill -f` against the appex binary path so any TestFSExtension
-    /// process from a previous bundle gets reaped. Empirically validated
-    /// on macOS 26.4.1 (vortex.local): a Sparkle update from 0.1.24 →
-    /// 0.1.25 left PID 3490 of the old extension alive for 1h17min;
-    /// mount(8) failed with `extensionKit.errorDomain error 2` until
-    /// the orphan was killed manually. Pre-flight enabledModules.plist
-    /// passed throughout — this is a separate failure mode from "not
-    /// enabled", and only manifests post-Sparkle-update, so it's
-    /// gated behind the same version-stamp check as the toggle cycle.
-    private static func killOrphanExtensionProcesses(appex: URL) {
-        let binary = appex
-            .appendingPathComponent("Contents/MacOS/TestFSExtension")
-            .resolvingSymlinksInPath().path
-        _ = ShellRunner.run("/usr/bin/pkill", ["-f", binary], timeout: subprocessTimeout)
+    /// Reap any TestFSExtension process from a previous bundle so
+    /// extensionkitd spawns a fresh instance from the updated appex
+    /// on the next mount. Uses libproc with exact-path equality
+    /// rather than `pkill -f` (a regex against full argv) so an
+    /// unrelated process that mentions the appex path — a grep in
+    /// a dev shell, a log viewer's window title — can't match.
+    private static func killOrphanExtensionProcesses() {
+        let count = proc_listallpids(nil, 0)
+        guard count > 0 else { return }
+        var pids = [pid_t](repeating: 0, count: Int(count))
+        let bytes = Int32(MemoryLayout<pid_t>.size * pids.count)
+        let returned = proc_listallpids(&pids, bytes)
+        guard returned > 0 else { return }
+        let ownPid = getpid()
+        var pathBuf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        for pid in pids.prefix(Int(returned)) where pid != ownPid {
+            guard proc_pidpath(pid, &pathBuf, UInt32(pathBuf.count)) > 0 else { continue }
+            if String(cString: pathBuf) == appexBinaryPath {
+                kill(pid, SIGKILL)
+            }
+        }
     }
 
     /// Path of fskitd's per-user enabled-modules plist. System Settings
@@ -249,9 +263,7 @@ extension ContentView {
                 macOS couldn't reach the FSKit extension. Toggle TestFS \
                 off and back on under System Settings → General → Login \
                 Items & Extensions → File System Extensions to force \
-                re-adjudication, then try mounting again. App updates \
-                can leave the previous extension instance alive; toggling \
-                off+on tears it down.
+                re-adjudication, then try mounting again.
                 """
         }
         if raw.contains("Operation not permitted") || raw.contains("exit 69") {
