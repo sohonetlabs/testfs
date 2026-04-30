@@ -26,11 +26,9 @@ import Foundation
 final class FSKitEnabledWatcher: ObservableObject {
     @Published private(set) var isEnabled: Bool
 
-    private let plistDir: URL
     private var stream: FSEventStreamRef?
 
     init() {
-        plistDir = AppEnvironment.enabledModulesPlistURL.deletingLastPathComponent()
         isEnabled = AppEnvironment.isFSKitExtensionEnabled()
         start()
     }
@@ -50,6 +48,7 @@ final class FSKitEnabledWatcher: ObservableObject {
             retain: nil,
             release: nil,
             copyDescription: nil)
+        let plistDir = AppEnvironment.enabledModulesPlistURL.deletingLastPathComponent()
         let paths = [plistDir.path] as CFArray
         let callback: FSEventStreamCallback = { _, ctx, _, _, _, _ in
             guard let ctx else { return }

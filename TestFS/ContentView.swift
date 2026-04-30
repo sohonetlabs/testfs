@@ -22,12 +22,6 @@ struct ContentView: View {
     @State var options: MountOptions = .default
     @State var optionsExpanded = false
 
-    /// The version+build label the user last successfully mounted
-    /// with on this machine. Empty on first launch.
-    /// `performReregisterIfNeeded` uses this to skip re-registration
-    /// work when nothing's changed since the last successful mount.
-    @AppStorage(AppEnvironment.verifiedMountedVersionKey) var verifiedMountedVersion = ""
-
     /// Live mirror of fskitd's per-user `enabledModules.plist`.
     /// `isEnabled` flips the moment the user toggles TestFS in
     /// System Settings → Login Items & Extensions → File System
@@ -245,7 +239,7 @@ struct ContentView: View {
             try await MountManager.shared.mount(devNode: prep.devNodePath, at: mnt.path)
         } catch {
             try? await MountManager.shared.detach(bsdName: prep.bsdName)
-            status = Self.friendlyMountError(error.localizedDescription, mountpoint: mnt.path)
+            status = Self.friendlyMountError(error.localizedDescription)
             return
         }
 
@@ -280,10 +274,11 @@ struct ContentView: View {
             prep: prep, mountpoint: mountpoint,
             sourceJSON: sourceJSON, volumeName: volumeName)
         mounts = await MountRegistry.shared.snapshot()
-        // Stamp the running version as verified-working so the
-        // "enable the extension" banner stays hidden until the next
-        // app update potentially resets the System Settings toggle.
-        verifiedMountedVersion = AppEnvironment.versionLabel
+        // Stamp the running version so `performReregisterIfNeeded`
+        // skips its toggle cycle until the next version bump.
+        UserDefaults.standard.set(
+            AppEnvironment.versionLabel,
+            forKey: AppEnvironment.verifiedMountedVersionKey)
         status = "mounted \(prep.devNodePath) at \(mountpoint)"
     }
 

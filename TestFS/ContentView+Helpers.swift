@@ -206,7 +206,7 @@ extension ContentView {
     /// privacy-protected-mountpoint case. Other errors surface the
     /// raw mount(8) text verbatim and let the in-app log viewer
     /// expose the full stdout/stderr captured by MountManager.
-    static func friendlyMountError(_ raw: String, mountpoint: String) -> String {
+    static func friendlyMountError(_ raw: String) -> String {
         if raw.contains("Operation not permitted") || raw.contains("exit 69") {
             return """
                 Mount failed: \(raw)
