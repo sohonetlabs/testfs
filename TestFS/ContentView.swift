@@ -23,17 +23,17 @@ struct ContentView: View {
     @State var optionsExpanded = false
 
     /// The version+build label the user last successfully mounted
-    /// with on this machine. Empty on first launch. The banner shows
-    /// whenever this doesn't match the running build, which covers:
-    /// fresh install (empty != current); Sparkle update that reset
-    /// the System Settings extension toggle (old version != new); a
-    /// manual install of an older build (also won't match). Once the
-    /// user mounts successfully with the current version, the banner
-    /// stays gone until the next update. We don't try to detect the
-    /// toggle state directly because pluginkit's adjudication state
-    /// isn't a reliable oracle (Apple's own msdos/exfat extensions
-    /// show `-` and they work fine).
-    @AppStorage("verifiedMountedVersion") var verifiedMountedVersion = ""
+    /// with on this machine. Empty on first launch.
+    /// `performReregisterIfNeeded` uses this to skip re-registration
+    /// work when nothing's changed since the last successful mount.
+    @AppStorage(AppEnvironment.verifiedMountedVersionKey) var verifiedMountedVersion = ""
+
+    /// Live mirror of fskitd's per-user `enabledModules.plist`.
+    /// `isEnabled` flips the moment the user toggles TestFS in
+    /// System Settings → Login Items & Extensions → File System
+    /// Extensions, so the banner can disappear and the Mount button
+    /// re-enable without the user clicking anything in our app.
+    @StateObject private var fskitWatcher = FSKitEnabledWatcher()
 
     /// Remembered values for the Rate limit / IOP limit toggles, so
     /// flipping the toggle off → on restores whatever the user last
@@ -102,7 +102,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private var mountSection: some View {
-        if verifiedMountedVersion != AppEnvironment.versionLabel {
+        if !fskitWatcher.isEnabled {
             extensionDisabledBanner
         }
         Text("Mount").font(.headline)
@@ -198,6 +198,18 @@ struct ContentView: View {
     private func mountSelected() async {
         guard let json = pickedJSON, let mnt = pickedMountpoint else { return }
         busy = true; defer { busy = false }
+        // Pre-flight against fskitd's enabledModules.plist. If the
+        // user clicks Mount despite the banner (or before the watcher
+        // has refreshed after a toggle), short-circuit with the same
+        // guidance the banner gives instead of letting mount(8) fail
+        // with the cryptic "Module is disabled" / Cocoa 4099 chain.
+        guard fskitWatcher.isEnabled else {
+            status =
+                "TestFS extension isn't enabled. Toggle it on under "
+                + "System Settings → General → Login Items & Extensions "
+                + "→ File System Extensions, then try again."
+            return
+        }
         guard !recordIfAlreadyMounted(at: mnt.path) else { return }
         // Don't race app-init's re-registration kickoff.
         await ExtensionReregistration.shared.ensureCompleted()
