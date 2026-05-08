@@ -54,3 +54,13 @@ fastlane/test_output
 # fork. Kept around for a while after the sohonetlabs/testfs squash
 # in case anything needs to be recovered; remove manually once safe.
 .git.benroeder-archive/
+
+# Python venv used by the parity test harness (scripts/compare/).
+# Recreate with `python3 -m venv venv && venv/bin/pip install -r
+# research/test_json_fs/requirements/requirements.txt`.
+venv/
+
+# jsonfs.py writes a `jsonfs.log` next to its CWD when not using
+# --log-to-syslog. The parity harness uses --log-to-syslog, but ad-hoc
+# runs can drop one in the repo root.
+jsonfs.log
