@@ -175,10 +175,25 @@ func parseSize(_ raw: String) -> Int? {
 }
 
 extension MountOptions {
-    /// Accepts date-only (`YYYY-MM-DD`, midnight UTC) or full ISO 8601.
-    static func parseMtime(_ raw: String) -> Date? {
-        let dateOnly = ISO8601DateFormatter()
-        dateOnly.formatOptions = [.withFullDate]
+    /// Accepts date-only (`YYYY-MM-DD`, midnight in `timeZone`) or full
+    /// ISO 8601 (timezone is explicit in the string).
+    ///
+    /// The local-time interpretation of the date-only form matches the
+    /// Python reference: `datetime.strptime("YYYY-MM-DD", "%Y-%m-%d")`
+    /// returns a naive datetime, and `.timestamp()` then interprets it
+    /// as local time. The absolute epoch therefore depends on the host
+    /// timezone — that's a Python footgun we inherit on purpose to keep
+    /// parity with `jsonfs.py:874-876`.
+    ///
+    /// `timeZone` defaults to `.current` for production paths. Tests
+    /// pass an explicit zone so the regression check still discriminates
+    /// the bug on UTC CI hosts (where current==UTC would otherwise
+    /// trivially pass either implementation).
+    static func parseMtime(_ raw: String, timeZone: TimeZone = .current) -> Date? {
+        let dateOnly = DateFormatter()
+        dateOnly.dateFormat = "yyyy-MM-dd"
+        dateOnly.locale = Locale(identifier: "en_US_POSIX")
+        dateOnly.timeZone = timeZone
         if let date = dateOnly.date(from: raw) { return date }
         let dateTime = ISO8601DateFormatter()
         dateTime.formatOptions = [.withInternetDateTime]
