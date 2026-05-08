@@ -194,8 +194,13 @@ final class TestFSVolume: FSVolume {
             attrs.linkCount = UInt32(clamping: 2 + node.directoryChildCount)
             attrs.type = .directory
             attrs.mode = shape.dirMode
-            attrs.size = 0
-            attrs.allocSize = 0
+            // Report one volume block. The volume already declares
+            // `volumeStatBlockSize` bytes (TreeBuilder.swift) and surfaces
+            // it via FSStatFSResult.blockSize, so directories naturally
+            // report one block of dirent storage. Matches Python
+            // jsonfs.py's `st_size = 4096` for directories.
+            attrs.size = UInt64(TreeBuilder.volumeStatBlockSize)
+            attrs.allocSize = UInt64(TreeBuilder.volumeStatBlockSize)
         case .file:
             attrs.linkCount = 1
             attrs.type = .file

@@ -327,4 +327,14 @@ final class TreeBuilderTests: XCTestCase {
         }
     }
 
+    // MARK: - constants
+
+    func testVolumeStatBlockSizePinnedAt4096() {
+        // Pinned because TestFSVolume.buildAttributes uses this value as
+        // directories' st_size to match Python jsonfs.py. If the volume
+        // block size ever changes, the directory st_size flips with it
+        // and the parity contract has to be revisited.
+        XCTAssertEqual(TreeBuilder.volumeStatBlockSize, 4096)
+    }
+
 }
