@@ -43,6 +43,12 @@ DMG="build/TestFS-$VERSION.dmg"
 rm -rf "$ARCHIVE" "$EXPORT" "$STAGING" "$DMG"
 
 echo "=== archive ==="
+# CURRENT_PROJECT_VERSION + MARKETING_VERSION on the command line so the
+# host's synthesized Info.plist agrees with the embedded extension's
+# patched plist; otherwise extensionkitd async-evicts the registration
+# after install. See scripts/install.sh for the same override and full
+# rationale.
+NEXT_BUILD=$(($(tr -d '[:space:]' < .build_number 2>/dev/null || echo 0) + 1))
 xcodebuild \
     -project TestFS.xcodeproj \
     -scheme TestFS \
@@ -50,6 +56,8 @@ xcodebuild \
     -destination 'generic/platform=macOS' \
     -allowProvisioningUpdates \
     -archivePath "$ARCHIVE" \
+    "CURRENT_PROJECT_VERSION=$NEXT_BUILD" \
+    "MARKETING_VERSION=$VERSION" \
     archive
 
 echo ""
