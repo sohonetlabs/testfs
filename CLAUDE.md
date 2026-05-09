@@ -80,3 +80,20 @@ Per release: bump `VERSION`, commit, run `scripts/release.sh`, then `git tag`, p
 ## Parity reference
 
 This is a **port**, not a rewrite — behavior should track the Python original at `research/test_json_fs/jsonfs.py`. When changing semantics, default to matching the Python (defaults: `mtime=2017-10-17`, NFD normalization, null-byte fill). That submodule is also the source of `Examples/` shipped in the DMG and the fixtures used by tests.
+
+The contract is **byte-faithful parity with `jsonfs.py` at the filesystem boundary**: directory `st_size`, mtime semantics, duplicate dirents from a colliding readdir, last-wins lookup, and the user-supplied bytes for filenames as declared in the JSON tree. This is a *test* filesystem — its purpose is to expose pathological inputs to whatever tool the user is testing, so Python's "improper" behaviours at the filesystem boundary (NFD-fold collisions kept distinct, duplicate cache-files, etc.) are the correct stress-test outputs and the Swift port preserves them deliberately.
+
+The framing does not extend to:
+- Changing the Python reference or the parity harness to match Swift.
+- Relying on undocumented/private framework ABI to achieve byte fidelity.
+- Sentinel-re-encoding tricks that would require the Python side to apply a matching transform.
+
+### Parity matrix expected residue
+
+`scripts/compare/run_all.sh` compares 16 fixtures × 5 normalisations × 2 cache-file × 2 ignore-appledouble = 320 cells. The exact-bytes diff is the strict gate; an NFC-equivalent fallback (`scripts/compare/_canonicalize_listing.py`) catches one well-understood platform divergence.
+
+A residual ~40 cells across `archive_torture_evil_filenames.json` and `big_list_of_naughty_strings_fs.json` are **expected** to fail and **should not be "fixed"**. macOS's HFS+ canonicalisation runs at the VFS layer for FUSE-T mounts but not for FSKit mounts: when a JSON tree declares a name with a long combining-mark sequence (`a` + 100+ combining acutes), the kernel injects U+034F COMBINING GRAPHEME JOINER every ~32 marks as a Zalgo-text safety net before the bytes reach `find` on the Python mount. FSKit bypasses that, so Swift returns the bytes the JSON declared (251 bytes) while Python returns those bytes plus 3–6 inserted U+034F characters (~257 bytes).
+
+Both behaviours are faithful to their respective stacks. Swift is the correct one for the test-filesystem use case — the kernel's safety net contaminates the test signal before it reaches the tool under test. Adding a U+034F-strip step to the comparator would mask any future fixture that intentionally used U+034F, which is why the call has been to leave the residue visible and document it here instead.
+
+When investigating a parity-matrix failure: first check whether the diff is in those two fixtures and consists only of injected U+034F characters between combining marks. If so, it's expected residue. Real divergences will show up in any of the other 14 fixtures or as attribute-column mismatches (mode/size/uid/gid/mtime).
