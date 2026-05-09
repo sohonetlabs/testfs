@@ -61,9 +61,9 @@ enum TreeBuilder {
     static let maxTotalFileBytes: UInt64 =
         UInt64.max - UInt64(volumeStatBlockSize - 1)
 
-    /// Mutable state threaded through the recursive walk. Pulled into
-    /// a struct so individual visit/visitDirectory steps stay short
-    /// enough to satisfy SwiftLint's function_body_length budget.
+    /// Mutable state threaded through the iterative walk. Held in a
+    /// struct purely to keep the per-step closures in `build(...)`
+    /// short enough to satisfy SwiftLint's function-body budget.
     fileprivate struct Context {
         var nodesByID: [TreeNodeID: TreeIndex.Node] = [:]
         var nextID: TreeNodeID = 1
@@ -71,12 +71,36 @@ enum TreeBuilder {
         let options: MountOptions
     }
 
-    /// Walk `root` recursively and construct a TreeIndex. Names are
+    /// One in-progress directory on the iterative build stack. Carries
+    /// the source-order children, the index of the next child to
+    /// process, and the accumulators that become the finalized
+    /// `TreeIndex.Node` on exit. See `build(...)` for the lifecycle.
+    private struct DirectoryFrame {
+        let id: TreeNodeID
+        let parentID: TreeNodeID?
+        let rawName: String
+        let name: String
+        let contents: [TreeNode]
+        var nextChildIndex: Int
+        var childIDs: [TreeNodeID]
+        var byName: [Data: TreeNodeID]
+        /// Bumped as `.directory` children are appended so the exit
+        /// phase can drop the per-pop `O(children)` dict lookup that
+        /// the recursive walk used. Files don't bump it.
+        var directoryChildCount: Int
+    }
+
+    /// Walk `root` and construct a TreeIndex. Iterative (explicit
+    /// stack of `DirectoryFrame`) rather than recursive — `loadResource`
+    /// runs on a dispatch-queue thread whose stack tops out around
+    /// ~256 KB, much smaller than the main thread's 8 MB, so a
+    /// recursive `visit` ↔ `visitDirectory` blew up at ~243 frames
+    /// on archive_torture_path_lengths.json (196 levels). Names are
     /// normalized per `options.unicodeNormalization` before being
     /// stored or folded for lookup.
     static func build(root: TreeNode, options: MountOptions) throws -> TreeIndex {
         var ctx = Context(options: options)
-        let (rootID, _) = try visit(root, parentID: nil, ctx: &ctx)
+        let rootID = try buildIteratively(root: root, ctx: &ctx)
         return TreeIndex(
             nodesByID: ctx.nodesByID, rootID: rootID,
             unicodeNormalization: options.unicodeNormalization
@@ -92,102 +116,139 @@ enum TreeBuilder {
         return try build(root: root, options: options)
     }
 
-    /// Returns (id, normalized-name) so the caller doesn't have to
-    /// re-look-up the just-inserted node when checking for collisions.
-    private static func visit(
-        _ node: TreeNode, parentID: TreeNodeID?, ctx: inout Context
-    ) throws -> (TreeNodeID, String) {
-        let id = ctx.nextID
-        ctx.nextID += 1
-        switch node {
-        case .file(let rawName, let size):
-            let name = ctx.options.unicodeNormalization.apply(to: rawName)
-            let (newTotal, overflow) = ctx.totalFileBytes.addingReportingOverflow(size)
-            guard !overflow, newTotal <= Self.maxTotalFileBytes else {
-                let dir = parentID.map { displayPath(of: $0, nodesByID: ctx.nodesByID) } ?? "<root>"
-                throw BuildError.totalSizeOverflow(directory: dir, name: rawName)
-            }
-            ctx.totalFileBytes = newTotal
-            ctx.nodesByID[id] = TreeIndex.Node(
-                id: id, parentID: parentID, rawName: rawName, name: name,
-                kind: .file, size: size,
-                childrenIDs: [], childrenByName: [:],
-                directoryChildCount: 0
-            )
-            return (id, name)
-        case .directory(let rawName, let contents):
-            return try visitDirectory(
-                id: id, parentID: parentID, rawName: rawName,
-                contents: contents, ctx: &ctx)
+    private static func buildIteratively(root: TreeNode, ctx: inout Context) throws -> TreeNodeID {
+        switch root {
+        case .file:
+            let (id, _) = try makeFileNode(root, parentID: nil, ctx: &ctx)
+            return id
+        case .directory(let rawName, let userContents):
+            // Cache-control dotfiles are appended onto the root frame
+            // before the loop starts; nextChildIndex iterates through
+            // user content first, then the dotfiles, matching the
+            // recursive walk's ordering. Collision against a same-
+            // named user entry follows shared `appendChild` semantics
+            // (last-wins on lookup, both retained in childrenIDs).
+            let rootContents: [TreeNode] = ctx.options.addMacosCacheFiles
+                ? userContents + Self.macosCacheControlFiles
+                : userContents
+            var stack: [DirectoryFrame] = []
+            let rootID = pushDirectory(
+                rawName: rawName, contents: rootContents,
+                parentID: nil, ctx: &ctx, stack: &stack)
+            try runBuildLoop(stack: &stack, ctx: &ctx)
+            return rootID
         }
     }
 
-    private static func visitDirectory(
-        id: TreeNodeID, parentID: TreeNodeID?, rawName: String,
-        contents: [TreeNode], ctx: inout Context
-    ) throws -> (TreeNodeID, String) {
+    private static func runBuildLoop(stack: inout [DirectoryFrame], ctx: inout Context) throws {
+        while !stack.isEmpty {
+            let top = stack.count - 1
+            if stack[top].nextChildIndex == stack[top].contents.count {
+                let frame = stack.removeLast()
+                ctx.nodesByID[frame.id] = TreeIndex.Node(
+                    id: frame.id, parentID: frame.parentID,
+                    rawName: frame.rawName, name: frame.name,
+                    kind: .directory, size: 0,
+                    childrenIDs: frame.childIDs, childrenByName: frame.byName,
+                    directoryChildCount: frame.directoryChildCount
+                )
+                if !stack.isEmpty {
+                    let parent = stack.count - 1
+                    appendChild(id: frame.id, normalizedName: frame.name,
+                                to: &stack[parent])
+                    stack[parent].directoryChildCount += 1
+                }
+                continue
+            }
+
+            let child = stack[top].contents[stack[top].nextChildIndex]
+            stack[top].nextChildIndex += 1
+
+            switch child {
+            case .file:
+                let (childID, childName) = try makeFileNode(child, parentID: stack[top].id, ctx: &ctx)
+                appendChild(id: childID, normalizedName: childName, to: &stack[top])
+            case .directory(let rawName, let contents):
+                pushDirectory(
+                    rawName: rawName, contents: contents,
+                    parentID: stack[top].id, ctx: &ctx, stack: &stack)
+            }
+        }
+    }
+
+    /// Allocate the directory's id, insert a placeholder Node so
+    /// descendants' `displayPath` walks resolve through us, and
+    /// push a fresh `DirectoryFrame` onto the loop's stack.
+    @discardableResult
+    private static func pushDirectory(
+        rawName: String, contents: [TreeNode], parentID: TreeNodeID?,
+        ctx: inout Context, stack: inout [DirectoryFrame]
+    ) -> TreeNodeID {
+        let id = ctx.nextID
+        ctx.nextID += 1
         let name = ctx.options.unicodeNormalization.apply(to: rawName)
-        // Insert a placeholder up front so error messages in descendants
-        // (e.g. totalSizeOverflow) can walk back through us via parentID.
         ctx.nodesByID[id] = TreeIndex.Node(
             id: id, parentID: parentID, rawName: rawName, name: name,
             kind: .directory, size: 0,
             childrenIDs: [], childrenByName: [:],
             directoryChildCount: 0
         )
-
-        let capacity = contents.count + Self.macosCacheControlFiles.count
         var childIDs: [TreeNodeID] = []
-        childIDs.reserveCapacity(capacity)
-        // Byte-keyed map (see TreeIndex.Node.childrenByName for why
-        // not String) so NFC and NFD distinct byte sequences don't
-        // collide as keys.
+        childIDs.reserveCapacity(contents.count)
         var byName: [Data: TreeNodeID] = [:]
-        byName.reserveCapacity(capacity)
+        byName.reserveCapacity(contents.count)
+        stack.append(DirectoryFrame(
+            id: id, parentID: parentID,
+            rawName: rawName, name: name,
+            contents: contents, nextChildIndex: 0,
+            childIDs: childIDs, byName: byName,
+            directoryChildCount: 0
+        ))
+        return id
+    }
 
-        for child in contents {
-            let (childID, childName) = try visit(child, parentID: id, ctx: &ctx)
-            appendChild(id: childID, normalizedName: childName,
-                        childIDs: &childIDs, byName: &byName)
+    /// Build a leaf `.file` Node, insert it, and return its (id,
+    /// normalized name) so the caller can append it to the parent
+    /// frame's accumulators.
+    private static func makeFileNode(
+        _ node: TreeNode, parentID: TreeNodeID?, ctx: inout Context
+    ) throws -> (TreeNodeID, String) {
+        guard case .file(let rawName, let size) = node else {
+            preconditionFailure("makeFileNode called with non-file: \(node)")
         }
-
-        // Only the root gets the Spotlight-hint dotfiles: they're a
-        // volume-level signal. Append unconditionally — a collision
-        // with a same-named user file follows the shared `appendChild`
-        // semantics (last-wins for lookup, both retained in the
-        // directory listing — matches Python's `_add_macos_control_files`
-        // append + path_map dict assignment).
-        if parentID == nil && ctx.options.addMacosCacheFiles {
-            for extra in Self.macosCacheControlFiles {
-                let (extraID, extraName) = try visit(extra, parentID: id, ctx: &ctx)
-                appendChild(id: extraID, normalizedName: extraName,
-                            childIDs: &childIDs, byName: &byName)
-            }
+        let id = ctx.nextID
+        ctx.nextID += 1
+        let name = ctx.options.unicodeNormalization.apply(to: rawName)
+        let (newTotal, overflow) = ctx.totalFileBytes.addingReportingOverflow(size)
+        guard !overflow, newTotal <= Self.maxTotalFileBytes else {
+            let dir = parentID.map { displayPath(of: $0, nodesByID: ctx.nodesByID) } ?? "<root>"
+            throw BuildError.totalSizeOverflow(directory: dir, name: rawName)
         }
-
-        let subdirCount = childIDs.count { ctx.nodesByID[$0]?.kind == .directory }
+        ctx.totalFileBytes = newTotal
         ctx.nodesByID[id] = TreeIndex.Node(
             id: id, parentID: parentID, rawName: rawName, name: name,
-            kind: .directory, size: 0,
-            childrenIDs: childIDs, childrenByName: byName,
-            directoryChildCount: subdirCount
+            kind: .file, size: size,
+            childrenIDs: [], childrenByName: [:],
+            directoryChildCount: 0
         )
         return (id, name)
     }
 
-    /// Add a child to a directory's accumulators with Python-faithful
-    /// collision semantics: both childIDs are kept in `childIDs` (so
-    /// `enumerate`/readdir yields both raw names), and `byName[key]` is
-    /// last-wins so a normalized lookup resolves to the most recent
-    /// insertion. Matches `_build_path_map` in jsonfs.py:464.
+    /// Add a child to a directory frame's accumulators with Python-
+    /// faithful collision semantics: both childIDs are kept in
+    /// `childIDs` (so `enumerate`/readdir yields both raw names),
+    /// and `byName[key]` is last-wins so a normalized lookup resolves
+    /// to the most recent insertion. Matches `_build_path_map` in
+    /// jsonfs.py:464. Takes the whole frame inout because Swift's
+    /// exclusive-access check rejects two simultaneous `inout`
+    /// subscripts into the same `[DirectoryFrame]`.
     private static func appendChild(
         id childID: TreeNodeID,
         normalizedName: String,
-        childIDs: inout [TreeNodeID],
-        byName: inout [Data: TreeNodeID]
+        to frame: inout DirectoryFrame
     ) {
-        childIDs.append(childID)
-        byName[Data(normalizedName.utf8)] = childID
+        frame.childIDs.append(childID)
+        frame.byName[Data(normalizedName.utf8)] = childID
     }
 
     /// Reconstruct a display path from root to the given directory id
