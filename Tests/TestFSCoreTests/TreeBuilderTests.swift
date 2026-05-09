@@ -102,54 +102,7 @@ final class TreeBuilderTests: XCTestCase {
         XCTAssertNil(index.lookup(name: "b", in: index.rootID))
     }
 
-    // MARK: - collision handling
-
-    func testDuplicateNameFailsBuild() {
-        // Literal duplicate of the same name in the JSON tree.
-        let root: TreeNode = .directory(
-            name: "r",
-            contents: [
-                .file(name: "foo.txt", size: 1),
-                .file(name: "foo.txt", size: 2)
-            ])
-        XCTAssertThrowsError(try TreeBuilder.build(root: root, options: defaultOptions())) { error in
-            guard let err = error as? TreeBuilder.BuildError,
-                case .duplicateName(_, let name) = err
-            else {
-                return XCTFail("expected duplicateName, got \(error)")
-            }
-            XCTAssertEqual(name, "foo.txt")
-        }
-    }
-
-    func testDuplicateNameErrorIncludesFullPath() {
-        // Regression: earlier displayPath implementation walked from the
-        // not-yet-inserted self node and always produced bare dirname.
-        let root: TreeNode = .directory(
-            name: "top",
-            contents: [
-                .directory(
-                    name: "sub",
-                    contents: [
-                        .directory(
-                            name: "deep",
-                            contents: [
-                                .file(name: "a", size: 1),
-                                .file(name: "a", size: 2)
-                            ])
-                    ])
-            ])
-        XCTAssertThrowsError(try TreeBuilder.build(root: root, options: defaultOptions())) { error in
-            guard let err = error as? TreeBuilder.BuildError,
-                case .duplicateName(let directory, _) = err
-            else {
-                return XCTFail("expected duplicateName, got \(error)")
-            }
-            XCTAssertEqual(
-                directory, "top/sub/deep",
-                "displayPath should walk the parent chain, not just emit the dir name")
-        }
-    }
+    // Sibling-name collision tests: see TreeBuilderCollisionTests.swift.
 
     // MARK: - unicode normalization
 
@@ -281,11 +234,13 @@ final class TreeBuilderTests: XCTestCase {
         XCTAssertNil(index.lookup(name: ".metadata_never_index", in: sub!.id))
     }
 
-    func testCacheControlFilesDedupAgainstTreeContents() throws {
-        // archive_torture_format_sentinels.json (and similar fixtures)
-        // include `.metadata_never_index` in the JSON tree itself. Adding
-        // ours on top would case-fold-collide and the whole mount would
-        // fail. We should silently dedup and let the tree's own copy win.
+    func testCacheControlFilesAppendUnconditionally() throws {
+        // When a fixture pre-defines `.metadata_never_index` in its
+        // JSON tree, the cache-file append still runs and follows the
+        // shared last-wins collision contract: both copies remain in
+        // the directory listing, the appended cache one wins lookup.
+        // Matches Python jsonfs.py `_add_macos_control_files` +
+        // `_build_path_map`.
         var opts = defaultOptions()
         opts.addMacosCacheFiles = true
         let root: TreeNode = .directory(
@@ -296,17 +251,15 @@ final class TreeBuilderTests: XCTestCase {
             ])
         let index = try TreeBuilder.build(root: root, options: opts)
 
-        // Tree's own copy preserved (size 42, not the empty 0-byte one
-        // we'd have added).
-        let tree = index.lookup(name: ".metadata_never_index", in: index.rootID)
-        XCTAssertEqual(tree?.size, 42)
+        // 2 user files + 3 cache files, no dedup.
+        XCTAssertEqual(index.root.childrenIDs.count, 5)
 
-        // The other two cache-control extras still get added.
+        let resolved = index.lookup(name: ".metadata_never_index", in: index.rootID)
+        XCTAssertEqual(resolved?.size, 0,
+            "byName last-wins: the appended cache file (size 0) shadows the user's size-42 file")
+
         XCTAssertNotNil(index.lookup(name: ".metadata_never_index_unless_rootfs", in: index.rootID))
         XCTAssertNotNil(index.lookup(name: ".metadata_direct_scope_only", in: index.rootID))
-
-        // Total root children: tree's 2 + 2 of our extras (3rd was dedup'd).
-        XCTAssertEqual(index.root.childrenIDs.count, 4)
     }
 
     // MARK: - integration with real fixture

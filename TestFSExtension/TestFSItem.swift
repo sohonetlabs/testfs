@@ -15,8 +15,8 @@ import FSKit
 final class TestFSItem: FSItem {
     let node: TreeIndex.Node
     let cachedAttributes: FSItem.Attributes
-    /// Pre-wrapped FSFileName of `node.name`, cached so enumerate and
-    /// lookup don't allocate a new one per call.
+    /// Pre-wrapped FSFileName of `node.rawName`, cached so enumerate
+    /// and lookup don't allocate a new one per call.
     let fsName: FSFileName
     /// Absolute path within the volume (e.g., "/dir/file.txt"). Used as
     /// the lookup key for semi-random block selection.
@@ -25,7 +25,10 @@ final class TestFSItem: FSItem {
     init(node: TreeIndex.Node, attributes: FSItem.Attributes, path: String) {
         self.node = node
         self.cachedAttributes = attributes
-        self.fsName = FSFileName(string: node.name)
+        // `rawName`, not `name`: readdir/enumerate must yield the
+        // user-supplied bytes so NFC/NFD-distinct siblings stay
+        // byte-distinct on the way out. Matches Python jsonfs.py:619-621.
+        self.fsName = FSFileName(string: node.rawName)
         self.path = path
         super.init()
     }

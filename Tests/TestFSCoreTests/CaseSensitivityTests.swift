@@ -72,17 +72,21 @@ final class CaseSensitivityTests: XCTestCase {
         XCTAssertNil(index.lookup(name: "Foo.txt", in: index.rootID))
     }
 
-    /// Normalization can still cause merges (NFC and NFD canonicalize
-    /// to the same form under `.nfd`) and the duplicate must be flagged
-    /// at build time. Pins the contract that normalization-induced
-    /// duplicates still error, separately from the no-case-fold rule.
-    func testNormalizationInducedDuplicateStillErrors() {
+    /// Normalization-induced sibling collision (NFC `é` vs NFD `é`
+    /// under `.nfd`) is Python-faithful: both childIDs preserved,
+    /// `byName` last-wins. Matches `_build_path_map` in jsonfs.py.
+    func testNormalizationInducedDuplicateKeepsBothLastWinsLookup() throws {
         var opts = defaultOptions()
         opts.unicodeNormalization = .nfd
         let root: TreeNode = .directory(name: "root", contents: [
             .file(name: "R\u{00E9}port.pdf", size: 1),
             .file(name: "Re\u{0301}port.pdf", size: 2)
         ])
-        XCTAssertThrowsError(try TreeBuilder.build(root: root, options: opts))
+        let index = try TreeBuilder.build(root: root, options: opts)
+        XCTAssertEqual(index.root.childrenIDs.count, 2,
+            "both raw byte sequences must remain in childrenIDs (readdir parity)")
+        let resolved = index.lookup(name: "Re\u{0301}port.pdf", in: index.rootID)
+        XCTAssertEqual(resolved?.size, 2,
+            "last-wins: byName key points at the most-recently-inserted child")
     }
 }

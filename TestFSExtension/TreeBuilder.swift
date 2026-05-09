@@ -3,9 +3,10 @@
 //  TestFSCore / TestFSExtension
 //
 //  Builds a TreeIndex from a parsed JSONTree node, assigning monotonic
-//  IDs, applying Unicode normalization from MountOptions, preserving
-//  insertion order for enumeration cookies, and failing loudly on
-//  case-insensitive name collisions.
+//  IDs, applying Unicode normalization from MountOptions, and preserving
+//  insertion order for enumeration cookies. Collision handling is
+//  Python-faithful (last-wins on lookup, both raw names retained for
+//  readdir) — see `appendChild` for the contract.
 //
 //  Pure Swift — do NOT add `import FSKit` here. This file is
 //  dual-membership (TestFS host + TestFSExtension); FSKit isn't
@@ -29,9 +30,8 @@ enum TreeBuilder {
 
     enum BuildError: Error, LocalizedError {
         /// Two siblings had the same name after unicode normalization.
-        /// Either a literal duplicate in the JSON tree or a pair of
-        /// distinct byte sequences that canonicalize to the same form
-        /// (e.g. NFC `é` and NFD `é` under `unicode_normalization=nfd`).
+        /// No current emit site — kept so a future opt-in strict mode
+        /// has a typed error to throw without a source change.
         case duplicateName(directory: String, name: String)
 
         /// Adding this file's size would push past
@@ -109,7 +109,7 @@ enum TreeBuilder {
             }
             ctx.totalFileBytes = newTotal
             ctx.nodesByID[id] = TreeIndex.Node(
-                id: id, parentID: parentID, name: name,
+                id: id, parentID: parentID, rawName: rawName, name: name,
                 kind: .file, size: size,
                 childrenIDs: [], childrenByName: [:],
                 directoryChildCount: 0
@@ -127,10 +127,10 @@ enum TreeBuilder {
         contents: [TreeNode], ctx: inout Context
     ) throws -> (TreeNodeID, String) {
         let name = ctx.options.unicodeNormalization.apply(to: rawName)
-        // Insert a placeholder up front so collision errors in
-        // descendants can walk back through us via parentID.
+        // Insert a placeholder up front so error messages in descendants
+        // (e.g. totalSizeOverflow) can walk back through us via parentID.
         ctx.nodesByID[id] = TreeIndex.Node(
-            id: id, parentID: parentID, name: name,
+            id: id, parentID: parentID, rawName: rawName, name: name,
             kind: .directory, size: 0,
             childrenIDs: [], childrenByName: [:],
             directoryChildCount: 0
@@ -147,40 +147,47 @@ enum TreeBuilder {
 
         for child in contents {
             let (childID, childName) = try visit(child, parentID: id, ctx: &ctx)
-            let key = Data(childName.utf8)
-            if byName[key] != nil {
-                throw BuildError.duplicateName(
-                    directory: displayPath(of: id, nodesByID: ctx.nodesByID),
-                    name: childName
-                )
-            }
-            childIDs.append(childID)
-            byName[key] = childID
+            appendChild(id: childID, normalizedName: childName,
+                        childIDs: &childIDs, byName: &byName)
         }
 
         // Only the root gets the Spotlight-hint dotfiles: they're a
-        // volume-level signal. Skip any extra the JSON tree already
-        // staged itself (e.g. archive-torture fixtures include
-        // `.metadata_never_index`) so we don't double-add.
+        // volume-level signal. Append unconditionally — a collision
+        // with a same-named user file follows the shared `appendChild`
+        // semantics (last-wins for lookup, both retained in the
+        // directory listing — matches Python's `_add_macos_control_files`
+        // append + path_map dict assignment).
         if parentID == nil && ctx.options.addMacosCacheFiles {
             for extra in Self.macosCacheControlFiles {
-                let extraName = ctx.options.unicodeNormalization.apply(to: extra.name)
-                let extraKey = Data(extraName.utf8)
-                guard byName[extraKey] == nil else { continue }
-                let (extraID, _) = try visit(extra, parentID: id, ctx: &ctx)
-                childIDs.append(extraID)
-                byName[extraKey] = extraID
+                let (extraID, extraName) = try visit(extra, parentID: id, ctx: &ctx)
+                appendChild(id: extraID, normalizedName: extraName,
+                            childIDs: &childIDs, byName: &byName)
             }
         }
 
         let subdirCount = childIDs.count { ctx.nodesByID[$0]?.kind == .directory }
         ctx.nodesByID[id] = TreeIndex.Node(
-            id: id, parentID: parentID, name: name,
+            id: id, parentID: parentID, rawName: rawName, name: name,
             kind: .directory, size: 0,
             childrenIDs: childIDs, childrenByName: byName,
             directoryChildCount: subdirCount
         )
         return (id, name)
+    }
+
+    /// Add a child to a directory's accumulators with Python-faithful
+    /// collision semantics: both childIDs are kept in `childIDs` (so
+    /// `enumerate`/readdir yields both raw names), and `byName[key]` is
+    /// last-wins so a normalized lookup resolves to the most recent
+    /// insertion. Matches `_build_path_map` in jsonfs.py:464.
+    private static func appendChild(
+        id childID: TreeNodeID,
+        normalizedName: String,
+        childIDs: inout [TreeNodeID],
+        byName: inout [Data: TreeNodeID]
+    ) {
+        childIDs.append(childID)
+        byName[Data(normalizedName.utf8)] = childID
     }
 
     /// Reconstruct a display path from root to the given directory id

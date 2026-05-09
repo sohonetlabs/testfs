@@ -29,10 +29,26 @@ struct TreeIndex: Sendable, Equatable {
     /// A single node in the index. Structs are copied on lookup, so
     /// value-identity is all we need here; the FSKit layer adds class
     /// identity for the kernel cache.
+    ///
+    /// The `rawName` / `name` split exists because two distinct raw
+    /// byte sequences can collapse to the same normalized form (e.g.
+    /// NFC `é` and NFD `é` under `unicode_normalization=nfd`). Python
+    /// jsonfs.py exposes both raw names through `readdir` while its
+    /// `path_map` keys on the normalized form (last-wins). To match
+    /// that, the FSKit enumerate path emits `rawName` while the
+    /// `byName` lookup map and `childrenByName` keys come from `name`.
     struct Node: Sendable, Equatable {
         let id: TreeNodeID
         let parentID: TreeNodeID?  // nil for root
-        let name: String  // already unicode-normalized
+        /// Original byte sequence as read from the JSON tree, before
+        /// unicode normalization. Returned to the kernel via
+        /// FSItem.fsName so userspace sees the user-supplied bytes.
+        let rawName: String
+        /// `rawName` after `MountOptions.unicodeNormalization.apply(...)`.
+        /// Used as the lookup key in `childrenByName` and as the
+        /// canonical form for collision detection. Identical to
+        /// `rawName` when normalization is `.none`.
+        let name: String
         let kind: NodeKind
         let size: UInt64  // 0 for directories
         let childrenIDs: [TreeNodeID]
