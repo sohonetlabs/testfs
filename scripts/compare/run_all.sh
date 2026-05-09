@@ -101,6 +101,7 @@ APPLEDOUBLES=(false true)
 
 CELL_TOTAL=0
 CELL_PASS=0
+CELL_PASS_NFC=0  # subset of CELL_PASS that needed NFC canonicalisation
 CELL_FAIL=0
 declare -a CELL_FAILS=()
 
@@ -186,10 +187,29 @@ for norm in "${NORMS[@]}"; do
                 kill "$PY_PID" 2>/dev/null; wait "$PY_PID" 2>/dev/null; PY_PID=""
                 umount "$SW_MNT" 2>/dev/null || diskutil unmount force "$SW_MNT" 2>/dev/null || true
 
-                # Diff.
+                # Diff. Two-phase: strict byte match first, then a
+                # fallback that NFC-canonicalises the name column on
+                # both sides. macOS HFS+ canonicalisation runs at the
+                # VFS layer for FUSE-T mounts but not for FSKit
+                # mounts, so a name declared as NFC in the JSON tree
+                # surfaces as NFD via Python and as the original NFC
+                # bytes via Swift — both faithful to the contract,
+                # only the display form differs. The NFC-equivalent
+                # branch counts as a pass; attribute mismatches
+                # (mode/size/mtime) still surface because the helper
+                # only rewrites the first column.
                 if diff -u "$py_list" "$sw_list" > "$diff_out"; then
                     rm -f "$diff_out"
                     CELL_PASS=$((CELL_PASS + 1))
+                elif diff -u \
+                        <("$REPO/scripts/compare/_canonicalize_listing.py" < "$py_list") \
+                        <("$REPO/scripts/compare/_canonicalize_listing.py" < "$sw_list") \
+                        > /dev/null; then
+                    # Strict diff still kept on disk (in $diff_out)
+                    # so debugging "why was this NFC-equivalent and
+                    # not exact?" doesn't require a re-run.
+                    CELL_PASS=$((CELL_PASS + 1))
+                    CELL_PASS_NFC=$((CELL_PASS_NFC + 1))
                 else
                     CELL_FAIL=$((CELL_FAIL + 1))
                     CELL_FAILS+=("$opt_key:$name:diff")
@@ -203,7 +223,7 @@ done
 
 # ---- summary ----------------------------------------------------------------
 {
-    echo "Cells: $CELL_TOTAL total, $CELL_PASS passed, $CELL_FAIL failed"
+    echo "Cells: $CELL_TOTAL total, $CELL_PASS passed ($CELL_PASS_NFC NFC-equivalent), $CELL_FAIL failed"
     echo ""
     if [ ${#CELL_FAILS[@]} -gt 0 ]; then
         echo "Failures (option-key:fixture:cause):"
