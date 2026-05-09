@@ -118,7 +118,20 @@ extension TestFSVolume: FSVolume.Operations {
         let dir = try requireTestItem(directory)
         // POSIX: traversing through a non-directory is ENOTDIR, not ENOENT.
         guard dir.node.kind == .directory else { throw posixError(.ENOTDIR) }
-        let nameString = name.string ?? ""
+        // Decode the kernel's bytes ourselves rather than going through
+        // `name.string`. NSString bridging strips a leading U+FEFF BOM,
+        // which would prevent us from matching a stored name like
+        // "\u{FEFF}file.txt" against itself. `name.data` is the
+        // un-bridged wire representation; `String(data:utf8:)` decodes
+        // without canonicalization. Paired with the outbound
+        // `FSFileName(data:)` construction in TestFSItem.init.
+        guard let nameString = String(data: name.data, encoding: .utf8) else {
+            // FSFileName.h documents non-UTF-8 from a syscall as an
+            // error condition for the FSModule; EILSEQ is the POSIX
+            // errno for "illegal byte sequence" and is more honest
+            // than ENOENT (we wouldn't even know what name to search).
+            throw posixError(.EILSEQ)
+        }
         guard let child = index.lookup(name: nameString, in: dir.node.id),
             let item = itemsByID[child.id]
         else {

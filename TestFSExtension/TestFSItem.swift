@@ -25,10 +25,15 @@ final class TestFSItem: FSItem {
     init(node: TreeIndex.Node, attributes: FSItem.Attributes, path: String) {
         self.node = node
         self.cachedAttributes = attributes
-        // `rawName`, not `name`: readdir/enumerate must yield the
-        // user-supplied bytes so NFC/NFD-distinct siblings stay
-        // byte-distinct on the way out. Matches Python jsonfs.py:619-621.
-        self.fsName = FSFileName(string: node.rawName)
+        // `FSFileName(data:)`, not `(string:)`: empirically, a name
+        // like "\u{FEFF}file.txt" was losing the leading BOM somewhere
+        // through the NSString-bridged init, so the entry round-tripped
+        // out to the kernel as "file.txt" and became unfindable on
+        // lookup (parity matrix evidence on
+        // archive_torture_mojibake_traps.json). The byte init copies
+        // the UTF-8 sequence verbatim. The matching inbound decode
+        // lives in TestFSVolume+Ops.swift lookupItem(named:inDirectory:).
+        self.fsName = FSFileName(data: Data(node.rawName.utf8))
         self.path = path
         super.init()
     }
